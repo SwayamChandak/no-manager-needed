@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ecommerce-ops": {
+      "command": "python",
+      "args": ["main.py"],
+      "cwd": "."
+    }
+  }
+}
