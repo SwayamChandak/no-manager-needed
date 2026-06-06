@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
 
@@ -26,7 +27,14 @@ class Settings(BaseSettings):
 
     # Checkpoint store
     checkpoint_backend: str = "memory"  # "memory" | "sqlite" | "postgres"
-    postgres_url: Optional[str] = None
+
+    # PostgreSQL connection
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "ops_agent"
+    postgres_user: str = ""
+    postgres_password: str = ""
+    database_url: str = ""  # postgresql+asyncpg://user:password@host:port/db
 
     # HITL
     hitl_api_port: int = 8001
@@ -38,6 +46,15 @@ class Settings(BaseSettings):
     specialist_timeout_seconds: int = 30
 
     model_config = {"env_file": ".env", "extra": "ignore"}
+
+    @model_validator(mode="after")
+    def build_database_url(self) -> "Settings":
+        if not self.database_url and self.postgres_user and self.postgres_password:
+            self.database_url = (
+                f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
+                f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            )
+        return self
 
 
 settings = Settings()

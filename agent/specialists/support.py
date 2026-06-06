@@ -11,7 +11,6 @@ from config import settings
 from tools.crm import (
     get_common_issues,
     get_complaint_volume,
-    get_refund_rate,
     get_review_sentiment,
 )
 
@@ -30,13 +29,12 @@ Default date: {today}.
 
 support_tools = [
     get_complaint_volume,
-    get_refund_rate,
     get_review_sentiment,
     get_common_issues,
 ]
 
 
-def run_support_agent(state: OpsAgentState) -> dict:
+async def run_support_agent(state: OpsAgentState) -> dict:
     """Support specialist node."""
     sub_question = state.get("user_query", "")
     for msg in reversed(state.get("messages", [])):
@@ -48,10 +46,10 @@ def run_support_agent(state: OpsAgentState) -> dict:
     agent = create_react_agent(
         llm, support_tools, prompt=SUPPORT_SYSTEM_PROMPT.format(today=today)
     )
-    result = agent.invoke({"messages": [HumanMessage(content=sub_question)]})
+    result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
     final_message = result["messages"][-1].content if result.get("messages") else ""
 
-    summary_response = llm.invoke(
+    summary_response = await llm.ainvoke(
         [
             HumanMessage(
                 content=f"""Extract from this support investigation:

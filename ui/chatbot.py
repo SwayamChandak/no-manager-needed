@@ -14,6 +14,7 @@ import gradio as gr
 from langchain_core.messages import HumanMessage
 
 from agent.graph import graph
+from api.hitl_api import register_pending_session
 
 
 def _build_initial_state(query: str, session_id: str) -> dict:
@@ -42,8 +43,8 @@ def _build_initial_state(query: str, session_id: str) -> dict:
     }
 
 
-def chat_stream(message: str, history: list, log_text: str):
-    """Generator that streams graph execution updates to the Gradio UI.
+async def chat_stream(message: str, history: list, log_text: str):
+    """Async generator that streams graph execution updates to the Gradio UI.
 
     history is a list of {"role": "user"|"assistant", "content": str} dicts.
     We append the user message + assistant reply on each turn.
@@ -63,7 +64,7 @@ def chat_stream(message: str, history: list, log_text: str):
     new_history = history + [{"role": "user", "content": message}]
 
     try:
-        for update in graph.stream(initial_state, config=config, stream_mode="updates"):
+        async for update in graph.astream(initial_state, config=config, stream_mode="updates"):
             for node_name, node_output in update.items():
                 log_lines.append(f"[{node_name}] completed")
 
@@ -98,6 +99,33 @@ def chat_stream(message: str, history: list, log_text: str):
             "\n".join(log_lines),
         )
         return
+
+    # Check if the graph is suspended at an interrupt (HITL checkpoint)
+    try:
+        snapshot = graph.get_state(config)
+        if snapshot and snapshot.next:
+            # Graph is paused — register this session for the HITL API
+            proposed = snapshot.values.get("proposed_actions", [])
+            proposed_dicts = [
+                a.model_dump() if hasattr(a, "model_dump") else a
+                for a in proposed
+            ]
+            register_pending_session(session_id, proposed_dicts)
+
+            actions_text = "\n".join(
+                f"  - **{a.get('action_type', 'action')}**: {a.get('justification', '')}"
+                for a in proposed_dicts
+            )
+            final_answer = (
+                f"⏸ **Human approval required** before executing actions.\n\n"
+                f"**Session ID:** `{session_id}`\n\n"
+                f"**Proposed actions:**\n{actions_text}\n\n"
+                f"Approve via: `POST /hitl/approve/{session_id}`\n"
+                f"Reject via:  `POST /hitl/reject/{session_id}`\n"
+                f"View via:    `GET  /hitl/pending/{session_id}`"
+            )
+    except Exception:
+        pass  # If state check fails, fall through to normal final_answer handling
 
     if not final_answer:
         final_answer = "Agent completed but produced no final response."

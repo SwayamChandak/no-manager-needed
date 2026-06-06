@@ -36,7 +36,7 @@ marketing_tools = [
 ]
 
 
-def run_marketing_agent(state: OpsAgentState) -> dict:
+async def run_marketing_agent(state: OpsAgentState) -> dict:
     """Marketing specialist node."""
     sub_question = state.get("user_query", "")
     for msg in reversed(state.get("messages", [])):
@@ -48,10 +48,10 @@ def run_marketing_agent(state: OpsAgentState) -> dict:
     agent = create_react_agent(
         llm, marketing_tools, prompt=MARKETING_SYSTEM_PROMPT.format(today=today)
     )
-    result = agent.invoke({"messages": [HumanMessage(content=sub_question)]})
+    result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
     final_message = result["messages"][-1].content if result.get("messages") else ""
 
-    summary_response = llm.invoke(
+    summary_response = await llm.ainvoke(
         [
             HumanMessage(
                 content=f"""Extract from this marketing investigation:

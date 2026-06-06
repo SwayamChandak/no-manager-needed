@@ -40,7 +40,7 @@ sales_tools = [
 ]
 
 
-def run_sales_agent(state: OpsAgentState) -> dict:
+async def run_sales_agent(state: OpsAgentState) -> dict:
     """Sales specialist node — investigates revenue and order signals."""
     sub_question = state.get("user_query", "")
     for msg in reversed(state.get("messages", [])):
@@ -52,7 +52,7 @@ def run_sales_agent(state: OpsAgentState) -> dict:
     system_prompt = SALES_SYSTEM_PROMPT.format(today=today)
 
     agent = create_react_agent(llm, sales_tools, prompt=system_prompt)
-    result = agent.invoke({"messages": [HumanMessage(content=sub_question)]})
+    result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
 
     final_message = result["messages"][-1].content if result.get("messages") else ""
 
@@ -65,7 +65,7 @@ Investigation result:
 
 Return JSON: {{"signals": ["...", "..."], "confidence": 0.0}}"""
 
-    summary_response = llm.invoke([HumanMessage(content=summary_prompt)])
+    summary_response = await llm.ainvoke([HumanMessage(content=summary_prompt)])
     json_match = re.search(r"\{.*\}", summary_response.content, re.DOTALL)
     parsed = (
         json.loads(json_match.group())

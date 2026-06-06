@@ -82,7 +82,7 @@ async def diagnose(question: str, session_id: str) -> dict:
     Returns a structured finding with root causes and recommended actions.
     """
     initial_state = _build_initial_state(question, session_id, "diagnose")
-    result = graph.invoke(initial_state, config=_graph_config(session_id))
+    result = await graph.ainvoke(initial_state, config=_graph_config(session_id))
 
     final_response = result.get("final_response")
     root_causes = result.get("root_causes", [])
@@ -142,7 +142,7 @@ async def fix(
             "approved": approved if approved is not None else False,
             "modified_actions": action_plan,  # None if no modifications
         }
-        result = graph.invoke(Command(resume=approval_payload), config=config)
+        result = await graph.ainvoke(Command(resume=approval_payload), config=config)
 
         final_response = result.get("final_response")
         executed = result.get("executed_actions", [])
@@ -164,7 +164,7 @@ async def fix(
     initial_state = _build_initial_state(query, session_id, "fix")
 
     try:
-        result = graph.invoke(initial_state, config=config)
+        result = await graph.ainvoke(initial_state, config=config)
 
         # Check if the graph surfaced an interrupt in the result dict (LangGraph >= 0.2)
         if result.get("__interrupt__"):
@@ -283,7 +283,7 @@ async def summarize(date_range: str, focus_areas: Optional[List[str]] = None) ->
     initial_state = _build_initial_state(query, session_id, "summarize")
     initial_state["active_specialists"] = focus
 
-    result = graph.invoke(initial_state, config=_graph_config(session_id))
+    result = await graph.ainvoke(initial_state, config=_graph_config(session_id))
 
     final_response = result.get("final_response")
     root_causes = result.get("root_causes", [])

@@ -23,13 +23,19 @@ Supports two modes via --mode:
       + HITL FastAPI in background for human-in-the-loop approvals.
 """
 
-import argparse
+import sys
 import asyncio
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+import argparse
 import threading
 
 import uvicorn
 
 from config import settings
+from db import connection as db_connection
 from memory.long_term import seed_memory
 from api.hitl_api import hitl_app
 from mcp_server.server import mcp
@@ -69,8 +75,26 @@ def _seed_memory() -> None:
         print(f"[startup] Warning: could not seed memory: {exc}")
 
 
+async def _init_db() -> None:
+    """Initialise asyncpg pool if DATABASE_URL is configured."""
+    if settings.database_url:
+        try:
+            await db_connection.init_pool(dsn=settings.database_url)
+            print("[startup] DB pool initialised.")
+        except Exception as exc:
+            print(f"[startup] Warning: could not connect to database: {exc}")
+    else:
+        print("[startup] DATABASE_URL not set — running without DB (tools will use stubs).")
+
+
+async def _shutdown_db() -> None:
+    """Close the asyncpg pool at shutdown."""
+    await db_connection.close_pool()
+
+
 async def run_mcp_mode() -> None:
     """MCP mode: HITL API in background asyncio task, FastMCP server in foreground (stdio)."""
+    await _init_db()
     _seed_memory()
 
     print("[startup] Mode: MCP")
@@ -86,6 +110,7 @@ async def run_mcp_mode() -> None:
             await hitl_task
         except asyncio.CancelledError:
             pass
+        await _shutdown_db()
 
 
 def run_chat_mode() -> None:
@@ -95,6 +120,11 @@ def run_chat_mode() -> None:
     manages its own threads internally and conflicts with asyncio.run().
     We therefore keep this function synchronous and start HITL via a thread.
     """
+    if settings.database_url:
+        db_connection.configure(settings.database_url)
+        print("[startup] DB pool configured (lazy init — will connect on first query).")
+    else:
+        print("[startup] DATABASE_URL not set — running without DB (tools will use stubs).")
     _seed_memory()
 
     print("[startup] Mode: Chat")

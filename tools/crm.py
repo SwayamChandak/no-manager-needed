@@ -1,8 +1,129 @@
-from langchain_core.tools import tool
+"""
+tools/crm.py — Customer complaints, reviews, and support analytics tools.
+
+All functions are async and query the store schema via the shared asyncpg pool.
+"""
+
+from datetime import date as _date
+
+from langchain.tools import tool
+
+from db.connection import db_connection
 
 
 @tool
-def get_complaint_volume(date: str) -> dict:
+async def get_complaint_volume(date: str) -> dict:
+    """
+    Returns customer complaint volume and breakdown by category for a given date.
+    Args:
+        date: ISO date string
+    Returns dict with keys: date, total_complaints, pct_change_vs_prior_day, categories (list)
+    """
+    _date_val = _date.fromisoformat(date)
+    today_sql = """
+        SELECT category, COUNT(*) AS count
+        FROM store.complaints
+        WHERE type = 'complaint'
+          AND DATE(created_at AT TIME ZONE 'UTC') = $1::date
+        GROUP BY category
+        ORDER BY count DESC
+    """
+    prior_sql = """
+        SELECT COUNT(*)
+        FROM store.complaints
+        WHERE type = 'complaint'
+          AND DATE(created_at AT TIME ZONE 'UTC') = $1::date - 1
+    """
+    async with db_connection() as conn:
+        rows = await conn.fetch(today_sql, _date_val)
+        prior_total = int(await conn.fetchval(prior_sql, _date_val) or 0)
+    total = sum(int(r["count"]) for r in rows)
+    pct_change = (
+        round(((total - prior_total) / prior_total) * 100, 1) if prior_total else 0.0
+    )
+    return {
+        "date": date,
+        "total_complaints": total,
+        "pct_change_vs_prior_day": pct_change,
+        "categories": [
+            {"category": r["category"], "count": int(r["count"])}
+            for r in rows
+        ],
+    }
+
+
+@tool
+async def get_review_sentiment(date: str) -> dict:
+    """
+    Returns aggregated customer review sentiment for a given date.
+    Args:
+        date: ISO date string
+    Returns dict with keys: date, avg_rating (float), breakdown (list of {sentiment, count})
+    """
+    _date_val = _date.fromisoformat(date)
+    sql = """
+        SELECT
+            AVG(rating) AS avg_rating,
+            sentiment,
+            COUNT(*) AS count
+        FROM store.complaints
+        WHERE type = 'review'
+          AND DATE(created_at AT TIME ZONE 'UTC') = $1::date
+        GROUP BY sentiment
+    """
+    async with db_connection() as conn:
+        rows = await conn.fetch(sql, _date_val)
+    overall_avg = (
+        sum(float(r["avg_rating"] or 0) * int(r["count"]) for r in rows)
+        / sum(int(r["count"]) for r in rows)
+        if rows
+        else 0.0
+    )
+    return {
+        "date": date,
+        "avg_rating": round(overall_avg, 2),
+        "breakdown": [
+            {"sentiment": r["sentiment"], "count": int(r["count"])}
+            for r in rows
+        ],
+    }
+
+
+@tool
+async def get_common_issues(date: str, top_n: int = 5) -> dict:
+    """
+    Returns the most common customer-reported issues for a given date.
+    Args:
+        date: ISO date string
+        top_n: number of top issues to return
+    Returns dict with keys: date, issues (list of {issue, frequency, representative_quote})
+    """
+    _date_val = _date.fromisoformat(date)
+    sql = """
+        SELECT
+            COALESCE(category, 'review') AS issue,
+            COUNT(*) AS frequency,
+            MIN(description) AS representative_quote
+        FROM store.complaints
+        WHERE DATE(created_at AT TIME ZONE 'UTC') = $1::date
+        GROUP BY COALESCE(category, 'review')
+        ORDER BY frequency DESC
+        LIMIT $2
+    """
+    async with db_connection() as conn:
+        rows = await conn.fetch(sql, _date_val, top_n)
+    return {
+        "date": date,
+        "issues": [
+            {
+                "issue": r["issue"],
+                "frequency": int(r["frequency"]),
+                "representative_quote": r["representative_quote"] or "",
+            }
+            for r in rows
+        ],
+    }
+
     """
     Returns customer complaint volume and breakdown by category for a given date.
     Args:

@@ -57,6 +57,16 @@ class ActionResponse(BaseModel):
 _pending_sessions: dict[str, dict] = {}
 
 
+def register_pending_session(session_id: str, proposed_actions: list) -> None:
+    """Register a session that is suspended at the HITL interrupt checkpoint.
+    Called by the chatbot (or MCP fix tool) after graph.astream() stops due to interrupt().
+    """
+    _pending_sessions[session_id] = {
+        "proposed_actions": proposed_actions,
+        "registered_at": datetime.utcnow().isoformat(),
+    }
+
+
 def _graph_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
@@ -93,10 +103,12 @@ async def list_pending() -> List[str]:
     for sid in list(_pending_sessions.keys()):
         try:
             snapshot = graph.get_state(_graph_config(sid))
-            if snapshot and snapshot.next:
+            # Include if graph is still suspended (has next nodes) or just registered
+            if snapshot is None or snapshot.next:
                 pending.append(sid)
         except Exception:
-            continue
+            # If we can't read the state, keep it in the list (conservative)
+            pending.append(sid)
     return pending
 
 

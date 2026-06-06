@@ -12,7 +12,6 @@ from tools.inventory import (
     get_restock_recommendations,
     get_stock_levels,
     get_stockout_events,
-    get_viewed_not_purchased,
 )
 
 llm = AzureChatOpenAI(
@@ -32,12 +31,11 @@ Investigate thoroughly. Default date: {today}.
 inventory_tools = [
     get_stock_levels,
     get_stockout_events,
-    get_viewed_not_purchased,
     get_restock_recommendations,
 ]
 
 
-def run_inventory_agent(state: OpsAgentState) -> dict:
+async def run_inventory_agent(state: OpsAgentState) -> dict:
     """Inventory specialist node."""
     sub_question = state.get("user_query", "")
     for msg in reversed(state.get("messages", [])):
@@ -49,10 +47,10 @@ def run_inventory_agent(state: OpsAgentState) -> dict:
     agent = create_react_agent(
         llm, inventory_tools, prompt=INVENTORY_SYSTEM_PROMPT.format(today=today)
     )
-    result = agent.invoke({"messages": [HumanMessage(content=sub_question)]})
+    result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
     final_message = result["messages"][-1].content if result.get("messages") else ""
 
-    summary_response = llm.invoke(
+    summary_response = await llm.ainvoke(
         [
             HumanMessage(
                 content=f"""Extract from this inventory investigation:
