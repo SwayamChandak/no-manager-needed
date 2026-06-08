@@ -21,8 +21,8 @@ Your job is to parse the user's question and decide:
 3. A specific sub-question for each relevant specialist to investigate
 
 Intent definitions:
-- diagnose: user wants to understand WHY something happened (root cause analysis)
-- fix: user wants the system to take corrective action ("fix it", "restock", "pause campaign", "apply discount")
+- diagnose: user wants to understand the current state OR why something happened. Use this for ANY query that asks "what", "which", "how many", "show me", "list", "name", "identify", or "why". This is the default for all read-only investigative questions.
+- fix: user EXPLICITLY wants the system to take a corrective action using keywords like "fix", "restock", "apply discount", "pause", "launch a campaign", "resolve", "correct it". Do NOT use this for queries that just ask for information about problems.
 - recall: user is asking about past incidents ("what happened last time", "has this occurred before")
 - summarize: user wants a high-level business health summary ("summarize yesterday", "executive summary")
 

@@ -5,7 +5,7 @@ from langgraph.types import interrupt
 from agent.state import OpsAgentState, ProposedAction
 
 
-def run_hitl(state: OpsAgentState) -> dict:
+async def run_hitl(state: OpsAgentState) -> dict:
     """
     HITL checkpoint node.
     - For 'fix' intent: suspends graph via interrupt(), waits for human approval.

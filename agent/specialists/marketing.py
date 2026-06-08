@@ -51,6 +51,19 @@ async def run_marketing_agent(state: OpsAgentState) -> dict:
     result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
     final_message = result["messages"][-1].content if result.get("messages") else ""
 
+    # Extract actual tool outputs from ToolMessages in the ReAct agent's message history
+    from langchain_core.messages import ToolMessage as _ToolMessage
+    tool_outputs = []
+    for msg in result.get("messages", []):
+        if isinstance(msg, _ToolMessage):
+            try:
+                import json as _json
+                tool_outputs.append(_json.loads(msg.content))
+            except (ValueError, TypeError):
+                tool_outputs.append({"raw": str(msg.content)[:500]})
+    if not tool_outputs:
+        tool_outputs = [{"agent_output": final_message}]
+
     summary_response = await llm.ainvoke(
         [
             HumanMessage(
@@ -75,7 +88,7 @@ Return JSON: {{"signals": ["...", "..."], "confidence": 0.0}}"""
         domain="marketing",
         signals=parsed.get("signals", []),
         confidence=parsed.get("confidence", 0.5),
-        raw_tool_outputs=[{"agent_output": final_message}],
+        raw_tool_outputs=tool_outputs,
         sub_question_answered=sub_question,
     )
 

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from langgraph.types import Command
 
 from agent.graph import graph
+from api.hitl_store import hitl_store
 
 hitl_app = FastAPI(
     title="E-Commerce Ops Agent — HITL API",
@@ -49,24 +50,6 @@ class ActionResponse(BaseModel):
     timestamp: str
 
 
-# ---------------------------------------------------------------------------
-# In-memory pending sessions store.
-# Populated by the fix tool when the graph suspends; cleared on approve/reject.
-# For production, replace with Redis or Postgres-backed store.
-# ---------------------------------------------------------------------------
-_pending_sessions: dict[str, dict] = {}
-
-
-def register_pending_session(session_id: str, proposed_actions: list) -> None:
-    """Register a session that is suspended at the HITL interrupt checkpoint.
-    Called by the chatbot (or MCP fix tool) after graph.astream() stops due to interrupt().
-    """
-    _pending_sessions[session_id] = {
-        "proposed_actions": proposed_actions,
-        "registered_at": datetime.utcnow().isoformat(),
-    }
-
-
 def _graph_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
@@ -100,7 +83,7 @@ def _get_pending_state(session_id: str) -> dict:
 async def list_pending() -> List[str]:
     """Returns session IDs of all graphs currently suspended at the HITL checkpoint."""
     pending = []
-    for sid in list(_pending_sessions.keys()):
+    for sid in hitl_store.list_pending():
         try:
             snapshot = graph.get_state(_graph_config(sid))
             # Include if graph is still suspended (has next nodes) or just registered
@@ -143,8 +126,8 @@ async def approve(
     }
 
     try:
-        graph.invoke(Command(resume=approval_payload), config=config)
-        _pending_sessions.pop(session_id, None)
+        await graph.ainvoke(Command(resume=approval_payload), config=config)
+        hitl_store.remove(session_id)
         return ActionResponse(
             session_id=session_id,
             status="executed",
@@ -172,8 +155,8 @@ async def reject(
     }
 
     try:
-        graph.invoke(Command(resume=rejection_payload), config=config)
-        _pending_sessions.pop(session_id, None)
+        await graph.ainvoke(Command(resume=rejection_payload), config=config)
+        hitl_store.remove(session_id)
         return ActionResponse(
             session_id=session_id,
             status="rejected",
@@ -207,8 +190,8 @@ async def modify_and_approve(
     }
 
     try:
-        graph.invoke(Command(resume=approval_payload), config=config)
-        _pending_sessions.pop(session_id, None)
+        await graph.ainvoke(Command(resume=approval_payload), config=config)
+        hitl_store.remove(session_id)
         return ActionResponse(
             session_id=session_id,
             status="executed",

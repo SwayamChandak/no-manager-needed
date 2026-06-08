@@ -26,13 +26,7 @@ from mcp_server.schemas import (
     RecallResult,
     SummaryResult,
 )
-
-
-# ---------------------------------------------------------------------------
-# In-memory HITL session store
-# Maps session_id -> proposed_actions payload (set when graph hits interrupt)
-# ---------------------------------------------------------------------------
-_hitl_pending: dict[str, dict] = {}
+from api.hitl_store import hitl_store
 
 
 def _build_initial_state(query: str, session_id: str, intent_hint: str = "diagnose") -> OpsAgentState:
@@ -150,7 +144,7 @@ async def fix(
 
         status = "executed" if (approved and executed) else "rejected"
 
-        _hitl_pending.pop(session_id, None)
+        hitl_store.remove(session_id)
 
         return FixResult(
             session_id=session_id,
@@ -170,7 +164,7 @@ async def fix(
         if result.get("__interrupt__"):
             snapshot = graph.get_state(config)
             proposed = snapshot.values.get("proposed_actions", [])
-            _hitl_pending[session_id] = {"proposed_actions": [a.model_dump() for a in proposed]}
+            hitl_store.register(session_id, [a.model_dump() for a in proposed])
             return FixResult(
                 session_id=session_id,
                 status="awaiting_approval",
@@ -198,7 +192,7 @@ async def fix(
         # The graph is now suspended. Read the proposed actions from the checkpoint.
         snapshot = graph.get_state(config)
         proposed = snapshot.values.get("proposed_actions", [])
-        _hitl_pending[session_id] = {"proposed_actions": [a.model_dump() for a in proposed]}
+        hitl_store.register(session_id, [a.model_dump() for a in proposed])
 
         return FixResult(
             session_id=session_id,

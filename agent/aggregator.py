@@ -3,7 +3,7 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 
-from agent.state import AggregatorOutput, OpsAgentState, CorrelationMatrix, PairCorrelation
+from agent.state import AggregatorOutput, OpsAgentState
 from config import settings
 
 llm = AzureChatOpenAI(
@@ -46,7 +46,7 @@ Return structured output matching this schema:
   ],
   "proposed_actions": [
     {{
-      "action_type": "restock|apply_discount|pause_campaign|create_ticket",
+      "action_type": "restock|apply_discount|pause_campaign|relaunch_campaign|create_ticket",
       "parameters": "{{\"key\": \"value\"}}",
       "justification": "...",
       "estimated_impact": "..."
@@ -54,6 +54,13 @@ Return structured output matching this schema:
   ],
   "summary": "One paragraph summary of what happened and why."
 }}
+
+Action type reference — use ONLY these exact strings:
+- "restock": submit a restock order. parameters: {{"product_id": "...", "quantity": N}}
+- "apply_discount": apply a temporary discount. parameters: {{"product_ids": ["..."], "discount_pct": N, "duration_hours": N}}
+- "pause_campaign": pause an active campaign. parameters: {{"campaign_id": "...", "reason": "..."}}
+- "relaunch_campaign": reactivate a paused or inactive campaign. parameters: {{"campaign_id": "..."}}
+- "create_ticket": create a support ticket. parameters: {{"issue_description": "...", "priority": "low|medium|high|critical"}}
 """
 
 
@@ -66,13 +73,23 @@ def run_aggregator(state: OpsAgentState) -> dict:
             findings[domain] = finding
 
     if findings:
-        findings_text = "\n\n".join(
-            f"=== {domain.upper()} FINDINGS ===\n"
-            f"Signals: {', '.join(f.signals)}\n"
-            f"Confidence: {f.confidence}\n"
-            f"Sub-question answered: {f.sub_question_answered}"
-            for domain, f in findings.items()
-        )
+        parts = []
+        for domain, f in findings.items():
+            part = (
+                f"=== {domain.upper()} FINDINGS ===\n"
+                f"Signals: {', '.join(f.signals)}\n"
+                f"Confidence: {f.confidence}\n"
+                f"Sub-question answered: {f.sub_question_answered}"
+            )
+            if f.raw_tool_outputs:
+                import json as _json
+                raw_summary = _json.dumps(f.raw_tool_outputs, default=str)
+                # Truncate very large payloads to avoid token limits
+                if len(raw_summary) > 3000:
+                    raw_summary = raw_summary[:3000] + "... [truncated]"
+                part += f"\nRaw tool data: {raw_summary}"
+            parts.append(part)
+        findings_text = "\n\n".join(parts)
     else:
         findings_text = "No specialist findings available."
 
