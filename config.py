@@ -1,3 +1,4 @@
+import os
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
@@ -16,9 +17,9 @@ class Settings(BaseSettings):
     hf_embedding_model: str = "BAAI/bge-small-en-v1.5"
 
     # LangSmith observability
-    langchain_tracing_v2: bool = True
-    langchain_api_key: str = ""
-    langchain_project: str = "ecommerce-ops-agent"
+    langsmith_tracing: bool = True
+    langsmith_api_key: str = ""
+    langsmith_project: str = "default"
 
     # Qdrant vector store
     qdrant_url: str = "http://localhost:6333"
@@ -58,6 +59,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if settings.langsmith_api_key:
+    os.environ["LANGSMITH_TRACING"] = str(settings.langsmith_tracing).lower()
+    os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGSMITH_PROJECT"] = settings.langsmith_project
 
 
 

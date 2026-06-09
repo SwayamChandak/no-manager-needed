@@ -2,9 +2,12 @@ from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
+from deepeval.tracing import observe, update_current_span
+from deepeval.test_case import LLMTestCase
 
 from agent.state import OpsAgentState, OrchestratorDecision, SubQuestion
 from config import settings
+from eval.deepeval_setup import orchestrator_metrics
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -71,6 +74,12 @@ def run_orchestrator(state: OpsAgentState) -> dict:
     On first entry: parses intent, routes to specialists.
     On re-entry from reflection loop: sends targeted follow-up sub-questions.
     """
+    return _run_orchestrator_impl(state)
+
+
+@observe(metrics=orchestrator_metrics())
+def _run_orchestrator_impl(state: OpsAgentState) -> dict:
+    """Inner implementation wrapped by DeepEval tracing."""
     retry_count = state.get("retry_count", 0)
     reflection_notes = state.get("reflection_notes", [])
     user_query = state.get("user_query", "")
@@ -98,6 +107,18 @@ def run_orchestrator(state: OpsAgentState) -> dict:
                 name="orchestrator",
             )
         )
+
+    # Register the DeepEval test case for this span
+    update_current_span(
+        test_case=LLMTestCase(
+            input=user_query,
+            actual_output=(
+                f"Intent: {decision.intent}. "
+                f"Specialists: {decision.active_specialists}. "
+                f"Reasoning: {decision.reasoning}"
+            ),
+        )
+    )
 
     return {
         "intent": decision.intent,

@@ -2,9 +2,12 @@ from datetime import datetime
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import AzureChatOpenAI
+from deepeval.tracing import observe, update_current_span
+from deepeval.test_case import LLMTestCase
 
 from agent.state import OpsAgentState, StructuredResponse
 from config import settings
+from eval.deepeval_setup import output_formatter_metrics
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -15,6 +18,7 @@ llm = AzureChatOpenAI(
 )
 
 
+@observe(metrics=output_formatter_metrics())
 def run_output_formatter(state: OpsAgentState) -> dict:
     """
     Output formatter node — assembles the final StructuredResponse.
@@ -132,6 +136,13 @@ def run_output_formatter(state: OpsAgentState) -> dict:
 
     explanation_response = llm.invoke([HumanMessage(content=explanation_prompt)])
     explanation = explanation_response.content
+
+    update_current_span(
+        test_case=LLMTestCase(
+            input=state.get("user_query", ""),
+            actual_output=explanation,
+        )
+    )
 
     confidence = (
         sum(rc.confidence for rc in root_causes) / len(root_causes)

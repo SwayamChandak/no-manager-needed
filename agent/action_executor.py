@@ -5,6 +5,7 @@ from agent.state import ExecutedAction, OpsAgentState
 from tools.actions import (
     apply_discount,
     create_support_ticket,
+    launch_campaign,
     pause_campaign,
     relaunch_campaign,
     restock_product,
@@ -16,6 +17,7 @@ ACTION_TOOL_MAP = {
     "apply_discount": apply_discount,
     "pause_campaign": pause_campaign,
     "relaunch_campaign": relaunch_campaign,
+    "launch_campaign": launch_campaign,
     "create_ticket": create_support_ticket,
 }
 

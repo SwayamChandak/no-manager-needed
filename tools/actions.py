@@ -214,3 +214,111 @@ async def relaunch_campaign(campaign_id: str) -> dict:
         "campaign_id": campaign_id,
         "relaunched_at": row["updated_at"].isoformat(),
     }
+
+
+@tool
+async def launch_campaign(
+    name: str,
+    channel: str = "paid_search",
+    budget: float = 1000.0,
+    product_ids: list[str] | None = None,
+    discount_pct: float | None = None,
+    duration_hours: int = 168,
+) -> dict:
+    """
+    Creates a brand-new marketing campaign and optionally applies a product discount.
+    Args:
+        name: campaign name (e.g. 'laptop_new')
+        channel: one of 'paid_search','social_ads','email','organic','display','affiliate'
+        budget: campaign budget in dollars
+        product_ids: optional list of product UUID strings or SKUs to discount
+        discount_pct: optional discount percentage (e.g. 15.0 for 15%)
+        duration_hours: campaign duration in hours (default 168 = 7 days)
+    Returns dict with keys: status, campaign_id, external_id, name, channel, budget,
+        start_date, end_date, promo_id (if discount applied)
+    """
+    _VALID_CHANNELS = {
+        "paid_search", "social_ads", "email", "organic", "display", "affiliate"
+    }
+    if channel not in _VALID_CHANNELS:
+        channel = "paid_search"
+
+    session_id = current_session_id.get() or None
+    session_uuid = _uuid.UUID(session_id) if session_id else None
+
+    now = datetime.now(timezone.utc)
+    external_id = f"CAMP-{now.strftime('%Y%m%d%H%M%S')}"
+    start_date = now.date()
+    end_date = (now + timedelta(hours=duration_hours)).date()
+
+    async with db_connection() as conn:
+        campaign_row = await conn.fetchrow(
+            """
+            INSERT INTO store.campaigns
+                (external_id, name, channel, budget, spend_to_date,
+                 start_date, end_date, status, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, 0, $5, $6, 'active', NOW(), NOW())
+            RETURNING campaign_id, external_id, name, channel, budget, start_date, end_date
+            """,
+            external_id,
+            name,
+            channel,
+            budget,
+            start_date,
+            end_date,
+        )
+
+    result: dict = {
+        "status": "success",
+        "campaign_id": str(campaign_row["campaign_id"]),
+        "external_id": campaign_row["external_id"],
+        "name": campaign_row["name"],
+        "channel": campaign_row["channel"],
+        "budget": float(campaign_row["budget"]),
+        "start_date": campaign_row["start_date"].isoformat(),
+        "end_date": campaign_row["end_date"].isoformat(),
+    }
+
+    # Optionally apply a discount promotion for associated products
+    if product_ids and discount_pct is not None:
+        promo_id = f"PROMO-{now.strftime('%Y%m%d%H%M%S')}"
+        expires_at = now + timedelta(hours=duration_hours)
+
+        # Resolve SKUs to UUIDs where needed
+        resolved_ids = []
+        for pid in product_ids:
+            try:
+                _uuid.UUID(pid)
+                resolved_ids.append(pid)
+            except ValueError:
+                async with db_connection() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT product_id FROM store.products WHERE sku = $1 LIMIT 1",
+                        pid,
+                    )
+                if row:
+                    resolved_ids.append(str(row["product_id"]))
+
+        if resolved_ids:
+            async with db_connection() as conn:
+                promo_row = await conn.fetchrow(
+                    """
+                    INSERT INTO store.promotions
+                        (promo_id, product_ids, discount_pct, duration_hours,
+                         starts_at, expires_at, status, created_by_session_id)
+                    VALUES ($1, $2::jsonb, $3, $4, $5, $6, 'active', $7)
+                    RETURNING promo_id, expires_at
+                    """,
+                    promo_id,
+                    json.dumps(resolved_ids),
+                    discount_pct,
+                    duration_hours,
+                    now,
+                    expires_at,
+                    session_uuid,
+                )
+            result["promo_id"] = promo_row["promo_id"]
+            result["discount_pct"] = discount_pct
+            result["promo_expires_at"] = promo_row["expires_at"].isoformat()
+
+    return result

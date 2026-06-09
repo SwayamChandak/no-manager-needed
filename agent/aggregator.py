@@ -2,9 +2,12 @@ from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
+from deepeval.tracing import observe, update_current_span
+from deepeval.test_case import LLMTestCase
 
 from agent.state import AggregatorOutput, OpsAgentState
 from config import settings
+from eval.deepeval_setup import aggregator_metrics
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -46,7 +49,7 @@ Return structured output matching this schema:
   ],
   "proposed_actions": [
     {{
-      "action_type": "restock|apply_discount|pause_campaign|relaunch_campaign|create_ticket",
+      "action_type": "restock|apply_discount|pause_campaign|relaunch_campaign|launch_campaign|create_ticket",
       "parameters": "{{\"key\": \"value\"}}",
       "justification": "...",
       "estimated_impact": "..."
@@ -60,10 +63,61 @@ Action type reference — use ONLY these exact strings:
 - "apply_discount": apply a temporary discount. parameters: {{"product_ids": ["..."], "discount_pct": N, "duration_hours": N}}
 - "pause_campaign": pause an active campaign. parameters: {{"campaign_id": "...", "reason": "..."}}
 - "relaunch_campaign": reactivate a paused or inactive campaign. parameters: {{"campaign_id": "..."}}
+- "launch_campaign": create a brand-new campaign and optionally apply a product discount. parameters: {{"name": "...", "channel": "paid_search|social_ads|email|organic|display|affiliate", "budget": N, "product_ids": ["..."], "discount_pct": N, "duration_hours": N}}
 - "create_ticket": create a support ticket. parameters: {{"issue_description": "...", "priority": "low|medium|high|critical"}}
 """
 
 
+def _build_aggregator_output_text(output: AggregatorOutput) -> str:
+    """
+    Flatten all aggregator output fields into a single text block for DeepEval.
+    The Root Cause Quality metric checks for cross-domain connections, ranked
+    root causes, and proposed actions — passing only output.summary omits those.
+    """
+    import json as _json
+
+    lines: list[str] = [f"Summary: {output.summary}"]
+
+    if output.root_causes:
+        lines.append("\nRoot Causes (ranked by confidence):")
+        for i, rc in enumerate(output.root_causes, 1):
+            domains = ", ".join(rc.supporting_domains) if rc.supporting_domains else "—"
+            evidence = "; ".join(rc.evidence[:3]) if rc.evidence else "—"
+            lines.append(
+                f"  {i}. [{rc.confidence:.0%}] {rc.description}\n"
+                f"     Domains: {domains}\n"
+                f"     Evidence: {evidence}"
+            )
+
+    if output.proposed_actions:
+        lines.append("\nProposed Actions:")
+        for pa in output.proposed_actions:
+            lines.append(
+                f"  - {pa.action_type}: {pa.justification} "
+                f"(impact: {pa.estimated_impact})"
+            )
+
+    # Include non-trivial cross-domain correlations
+    matrix = output.correlation_matrix
+    if matrix:
+        linked = [
+            f"{pair}: {info.explanation}"
+            for pair, info in [
+                ("sales↔inventory", matrix.sales_inventory),
+                ("sales↔marketing", matrix.sales_marketing),
+                ("inventory↔marketing", matrix.inventory_marketing),
+                ("sales↔support", matrix.sales_support),
+            ]
+            if info and info.linked
+        ]
+        if linked:
+            lines.append("\nCross-domain links detected:")
+            lines.extend(f"  • {l}" for l in linked)
+
+    return "\n".join(lines)
+
+
+@observe(metrics=aggregator_metrics())
 def run_aggregator(state: OpsAgentState) -> dict:
     """Aggregator node — cross-domain correlation and root cause ranking."""
     findings = {}
@@ -104,6 +158,13 @@ def run_aggregator(state: OpsAgentState) -> dict:
             SystemMessage(content=prompt),
             HumanMessage(content="Analyze the findings and return the structured output."),
         ]
+    )
+
+    update_current_span(
+        test_case=LLMTestCase(
+            input=state.get("user_query", ""),
+            actual_output=_build_aggregator_output_text(output),
+        )
     )
 
     return {

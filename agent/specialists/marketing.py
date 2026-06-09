@@ -5,9 +5,12 @@ from datetime import date, datetime
 from langchain_core.messages import HumanMessage
 from langchain_openai import AzureChatOpenAI
 from langgraph.prebuilt import create_react_agent
+from deepeval.tracing import observe, update_current_span
+from deepeval.test_case import LLMTestCase
 
 from agent.state import OpsAgentState, SpecialistFinding
 from config import settings
+from eval.deepeval_setup import marketing_metrics
 from tools.campaigns import (
     get_campaign_performance,
     get_channel_breakdown,
@@ -36,6 +39,7 @@ marketing_tools = [
 ]
 
 
+@observe(metrics=marketing_metrics())
 async def run_marketing_agent(state: OpsAgentState) -> dict:
     """Marketing specialist node."""
     sub_question = state.get("user_query", "")
@@ -90,6 +94,16 @@ Return JSON: {{"signals": ["...", "..."], "confidence": 0.0}}"""
         confidence=parsed.get("confidence", 0.5),
         raw_tool_outputs=tool_outputs,
         sub_question_answered=sub_question,
+    )
+
+    update_current_span(
+        test_case=LLMTestCase(
+            input=sub_question,
+            actual_output=final_message,
+            retrieval_context=[
+                json.dumps(o, default=str) for o in tool_outputs[:6]
+            ] if tool_outputs else None,
+        )
     )
 
     return {

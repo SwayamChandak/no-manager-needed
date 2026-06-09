@@ -20,6 +20,9 @@ dependencies = [
     "gradio>=4.0.0",
     "asyncpg>=0.29.0",
     "langgraph-checkpoint-postgres>=2.0.0",
+    "langsmith>=0.8.9",
+    "deepeval>=4.0.5",
+    "textual>=8.2.7",
 ]
 
 [tool.hatch.build.targets.wheel]
