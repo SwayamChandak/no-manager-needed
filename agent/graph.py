@@ -11,6 +11,8 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Send
 
+from tools.registry import load_all_tools
+
 from agent.state import OpsAgentState
 from config import settings
 
@@ -164,10 +166,21 @@ def build_graph() -> CompiledStateGraph:
     builder.add_edge("output_formatter_node", END)
 
     # ------------------------------------------------------------------
-    # Compile with MemorySaver checkpointer (dev / test mode).
-    # Production swaps this via get_checkpointer() in config.
+    # Tool registry — populate before any node can run
     # ------------------------------------------------------------------
-    checkpointer = MemorySaver()
+    load_all_tools()
+
+    # ------------------------------------------------------------------
+    # Checkpointer selection
+    # ------------------------------------------------------------------
+    if settings.checkpoint_backend == "postgres" and settings.database_url:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+        checkpointer = AsyncPostgresSaver.from_conn_string(dsn)
+    else:
+        checkpointer = MemorySaver()
+
     return builder.compile(checkpointer=checkpointer)
 
 

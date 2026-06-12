@@ -121,7 +121,6 @@ def _run_orchestrator_impl(state: OpsAgentState) -> dict:
     )
 
     return {
-        "intent": decision.intent,
         "active_specialists": decision.active_specialists,
         "retry_count": retry_count + 1 if retry_count > 0 else 0,
         "messages": specialist_messages,

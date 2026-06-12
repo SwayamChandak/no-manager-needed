@@ -11,11 +11,7 @@ from deepeval.test_case import LLMTestCase
 from agent.state import OpsAgentState, SpecialistFinding
 from config import settings
 from eval.deepeval_setup import support_metrics
-from tools.crm import (
-    get_common_issues,
-    get_complaint_volume,
-    get_review_sentiment,
-)
+from tools.registry import get_tools_for_agent
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -30,12 +26,6 @@ You have tools to check complaint volume, refund rates, review sentiment, and co
 Default date: {today}.
 """
 
-support_tools = [
-    get_complaint_volume,
-    get_review_sentiment,
-    get_common_issues,
-]
-
 
 @observe(metrics=support_metrics())
 async def run_support_agent(state: OpsAgentState) -> dict:
@@ -48,7 +38,7 @@ async def run_support_agent(state: OpsAgentState) -> dict:
 
     today = date.today().isoformat()
     agent = create_react_agent(
-        llm, support_tools, prompt=SUPPORT_SYSTEM_PROMPT.format(today=today)
+        llm, get_tools_for_agent("support"), prompt=SUPPORT_SYSTEM_PROMPT.format(today=today)
     )
     result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
     final_message = result["messages"][-1].content if result.get("messages") else ""

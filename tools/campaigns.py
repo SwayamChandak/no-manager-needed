@@ -6,12 +6,12 @@ All functions are async and query the store schema via the shared asyncpg pool.
 
 from datetime import date as _date
 
-from langchain.tools import tool
+from tools.registry import safe_tool
 
 from db.connection import db_connection
 
 
-@tool
+@safe_tool(agents=["marketing"])
 async def get_campaign_performance(date: str) -> dict:
     """
     Returns campaign performance metrics for a given date.
@@ -60,7 +60,7 @@ async def get_campaign_performance(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["marketing"])
 async def get_channel_breakdown(date: str) -> dict:
     """
     Returns performance breakdown by marketing channel for a given date.
@@ -96,7 +96,7 @@ async def get_channel_breakdown(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["marketing"])
 async def get_paused_campaigns(date: str) -> dict:
     """
     Returns all campaigns that were paused on a given date and the reason.
@@ -134,7 +134,7 @@ async def get_paused_campaigns(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["marketing"])
 async def get_promotion_schedule() -> dict:
     """
     Returns all active or upcoming promotions.

@@ -59,12 +59,14 @@ Return structured output matching this schema:
 }}
 
 Action type reference — use ONLY these exact strings:
-- "restock": submit a restock order. parameters: {{"product_id": "...", "quantity": N}}
+- "restock": submit a restock order. parameters: {{"product_name": "the exact product name", "quantity": N}}
 - "apply_discount": apply a temporary discount. parameters: {{"product_ids": ["..."], "discount_pct": N, "duration_hours": N}}
-- "pause_campaign": pause an active campaign. parameters: {{"campaign_id": "...", "reason": "..."}}
+- "pause_campaign": pause an active campaign by its name. parameters: {{"campaign_name": "COPY the 'name' field VERBATIM from the raw tool data — do NOT paraphrase, abbreviate, or guess. Example: if raw tool data shows \"name\": \"Summer Tech Sale\", use \"Summer Tech Sale\" exactly.", "reason": "..."}}
 - "relaunch_campaign": reactivate a paused or inactive campaign. parameters: {{"campaign_id": "..."}}
-- "launch_campaign": create a brand-new campaign and optionally apply a product discount. parameters: {{"name": "...", "channel": "paid_search|social_ads|email|organic|display|affiliate", "budget": N, "product_ids": ["..."], "discount_pct": N, "duration_hours": N}}
+- "launch_campaign": create a brand-new campaign and optionally apply a product discount. parameters: {{"name": "...", "channel": "paid_search|social_ads|email|organic|display|affiliate", "budget": N, "product_names": ["Laptop Pro 15"], "discount_pct": N, "duration_hours": N}}
 - "create_ticket": create a support ticket. parameters: {{"issue_description": "...", "priority": "low|medium|high|critical"}}
+
+CRITICAL: When proposing a "pause_campaign" action, you MUST copy the campaign "name" field character-for-character from the raw tool data in the findings above. Never paraphrase or shorten it.
 """
 
 

@@ -78,6 +78,19 @@ async def diagnose(question: str, session_id: str) -> dict:
     initial_state = _build_initial_state(question, session_id, "diagnose")
     result = await graph.ainvoke(initial_state, config=_graph_config(session_id))
 
+    # Safety net: if graph suspended at HITL (should not happen for diagnose intent),
+    # return a clear message instead of "No finding generated."
+    diag_snapshot = graph.get_state(_graph_config(session_id))
+    if diag_snapshot and diag_snapshot.next:
+        return DiagnoseResult(
+            session_id=session_id,
+            finding="This query requires corrective actions. Please rephrase using fix intent (e.g., 'launch a campaign', 'restock', 'fix').",
+            root_causes=result.get("root_causes", []),
+            confidence=0.0,
+            supporting_data={},
+            recommended_actions=result.get("proposed_actions", []),
+        ).model_dump()
+
     final_response = result.get("final_response")
     root_causes = result.get("root_causes", [])
 
@@ -160,11 +173,11 @@ async def fix(
     try:
         result = await graph.ainvoke(initial_state, config=config)
 
-        # Check if the graph surfaced an interrupt in the result dict (LangGraph >= 0.2)
-        if result.get("__interrupt__"):
-            snapshot = graph.get_state(config)
-            proposed = snapshot.values.get("proposed_actions", [])
-            hitl_store.register(session_id, [a.model_dump() for a in proposed])
+        # LangGraph >= 0.2: detect interrupt via graph.get_state().next (non-empty = suspended)
+        snapshot = graph.get_state(config)
+        if snapshot and snapshot.next:
+            proposed = result.get("proposed_actions", [])
+            hitl_store.register(session_id, [a.model_dump() if hasattr(a, "model_dump") else a for a in proposed])
             return FixResult(
                 session_id=session_id,
                 status="awaiting_approval",

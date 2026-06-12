@@ -11,11 +11,7 @@ from deepeval.test_case import LLMTestCase
 from agent.state import OpsAgentState, SpecialistFinding
 from config import settings
 from eval.deepeval_setup import inventory_metrics
-from tools.inventory import (
-    get_restock_recommendations,
-    get_stock_levels,
-    get_stockout_events,
-)
+from tools.registry import get_tools_for_agent
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -31,12 +27,6 @@ and get restock recommendations.
 Investigate thoroughly. Default date: {today}.
 """
 
-inventory_tools = [
-    get_stock_levels,
-    get_stockout_events,
-    get_restock_recommendations,
-]
-
 
 @observe(metrics=inventory_metrics())
 async def run_inventory_agent(state: OpsAgentState) -> dict:
@@ -49,7 +39,7 @@ async def run_inventory_agent(state: OpsAgentState) -> dict:
 
     today = date.today().isoformat()
     agent = create_react_agent(
-        llm, inventory_tools, prompt=INVENTORY_SYSTEM_PROMPT.format(today=today)
+        llm, get_tools_for_agent("inventory"), prompt=INVENTORY_SYSTEM_PROMPT.format(today=today)
     )
     result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
     final_message = result["messages"][-1].content if result.get("messages") else ""

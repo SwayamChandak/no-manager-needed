@@ -7,12 +7,12 @@ All functions are async and query the store schema via the shared asyncpg pool.
 import uuid as _uuid
 from datetime import date as _date
 
-from langchain.tools import tool
+from tools.registry import safe_tool
 
 from db.connection import db_connection
 
 
-@tool
+@safe_tool(agents=["inventory"])
 async def get_stock_levels(product_ids: list[str] | None = None) -> dict:
     """
     Returns current stock levels for products.
@@ -51,7 +51,7 @@ async def get_stock_levels(product_ids: list[str] | None = None) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["inventory"])
 async def get_stockout_events(date: str) -> dict:
     """
     Returns all stockout events (products that went out of stock) on a given date.
@@ -93,7 +93,7 @@ async def get_stockout_events(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["inventory"])
 async def get_restock_recommendations(threshold_multiplier: float = 1.0) -> dict:
     """
     Returns restock recommendations for products at or below the reorder threshold.

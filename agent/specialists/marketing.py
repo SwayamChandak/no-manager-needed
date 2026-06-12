@@ -11,12 +11,7 @@ from deepeval.test_case import LLMTestCase
 from agent.state import OpsAgentState, SpecialistFinding
 from config import settings
 from eval.deepeval_setup import marketing_metrics
-from tools.campaigns import (
-    get_campaign_performance,
-    get_channel_breakdown,
-    get_paused_campaigns,
-    get_promotion_schedule,
-)
+from tools.registry import get_tools_for_agent
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -31,13 +26,6 @@ You have tools to check campaign performance, channel breakdowns, paused campaig
 Default date: {today}.
 """
 
-marketing_tools = [
-    get_campaign_performance,
-    get_channel_breakdown,
-    get_paused_campaigns,
-    get_promotion_schedule,
-]
-
 
 @observe(metrics=marketing_metrics())
 async def run_marketing_agent(state: OpsAgentState) -> dict:
@@ -50,7 +38,7 @@ async def run_marketing_agent(state: OpsAgentState) -> dict:
 
     today = date.today().isoformat()
     agent = create_react_agent(
-        llm, marketing_tools, prompt=MARKETING_SYSTEM_PROMPT.format(today=today)
+        llm, get_tools_for_agent("marketing"), prompt=MARKETING_SYSTEM_PROMPT.format(today=today)
     )
     result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
     final_message = result["messages"][-1].content if result.get("messages") else ""

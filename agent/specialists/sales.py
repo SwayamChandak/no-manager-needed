@@ -11,13 +11,7 @@ from deepeval.test_case import LLMTestCase
 from agent.state import OpsAgentState, SpecialistFinding
 from config import settings
 from eval.deepeval_setup import sales_metrics
-from tools.analytics import (
-    detect_anomaly,
-    get_order_volume,
-    get_revenue_by_product,
-    get_revenue_by_region,
-    get_revenue_timeseries,
-)
+from tools.registry import get_tools_for_agent
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -34,14 +28,6 @@ Always use today's date or the date mentioned in the query. Default date: {today
 Be specific about which products, regions, and time windows you investigated.
 """
 
-sales_tools = [
-    get_revenue_timeseries,
-    get_order_volume,
-    get_revenue_by_product,
-    get_revenue_by_region,
-    detect_anomaly,
-]
-
 
 @observe(metrics=sales_metrics())
 async def run_sales_agent(state: OpsAgentState) -> dict:
@@ -55,7 +41,7 @@ async def run_sales_agent(state: OpsAgentState) -> dict:
     today = date.today().isoformat()
     system_prompt = SALES_SYSTEM_PROMPT.format(today=today)
 
-    agent = create_react_agent(llm, sales_tools, prompt=system_prompt)
+    agent = create_react_agent(llm, get_tools_for_agent("sales"), prompt=system_prompt)
     result = await agent.ainvoke({"messages": [HumanMessage(content=sub_question)]})
 
     final_message = result["messages"][-1].content if result.get("messages") else ""

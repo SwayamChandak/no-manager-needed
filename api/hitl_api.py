@@ -79,7 +79,7 @@ def _get_pending_state(session_id: str) -> dict:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@hitl_app.get("/hitl/pending", summary="List all sessions awaiting approval")
+@hitl_app.get("/pending", summary="List all sessions awaiting approval")
 async def list_pending() -> List[str]:
     """Returns session IDs of all graphs currently suspended at the HITL checkpoint."""
     pending = []
@@ -95,7 +95,7 @@ async def list_pending() -> List[str]:
     return pending
 
 
-@hitl_app.get("/hitl/pending/{session_id}", summary="Get proposed actions for a session")
+@hitl_app.get("/pending/{session_id}", summary="Get proposed actions for a session")
 async def get_pending(session_id: str) -> HITLStatusResponse:
     """Returns the proposed actions waiting for approval for a specific session."""
     state_data = _get_pending_state(session_id)
@@ -107,7 +107,7 @@ async def get_pending(session_id: str) -> HITLStatusResponse:
     )
 
 
-@hitl_app.post("/hitl/approve/{session_id}", summary="Approve proposed actions")
+@hitl_app.post("/approve/{session_id}", summary="Approve proposed actions")
 async def approve(
     session_id: str,
     request: ApproveRequest = ApproveRequest(),
@@ -138,7 +138,7 @@ async def approve(
         raise HTTPException(status_code=500, detail=f"Failed to resume graph: {exc}")
 
 
-@hitl_app.post("/hitl/reject/{session_id}", summary="Reject proposed actions")
+@hitl_app.post("/reject/{session_id}", summary="Reject proposed actions")
 async def reject(
     session_id: str,
     request: RejectRequest = RejectRequest(),
@@ -167,7 +167,7 @@ async def reject(
         raise HTTPException(status_code=500, detail=f"Failed to resume graph: {exc}")
 
 
-@hitl_app.post("/hitl/modify/{session_id}", summary="Approve with modified actions")
+@hitl_app.post("/modify/{session_id}", summary="Approve with modified actions")
 async def modify_and_approve(
     session_id: str,
     request: ApproveRequest,

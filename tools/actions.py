@@ -10,7 +10,7 @@ import json
 import uuid as _uuid
 from datetime import datetime, timedelta, timezone
 
-from langchain.tools import tool
+from tools.registry import safe_tool
 
 from db.connection import db_connection
 
@@ -23,29 +23,26 @@ current_session_id: contextvars.ContextVar[str] = contextvars.ContextVar(
 _VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 
 
-@tool
-async def restock_product(product_id: str, quantity: int) -> dict:
+@safe_tool(agents=["action_executor"])
+async def restock_product(product_name: str, quantity: int) -> dict:
     """
     Submits a restock order for a product.
     Args:
-        product_id: UUID string or legacy SKU (e.g. 'P001')
+        product_name: the display name of the product (matched against store.products.name, case-insensitive)
         quantity: number of units to restock
     Returns dict with keys: status, restock_order_id, product_id, quantity, estimated_arrival
     """
     session_id = current_session_id.get() or None
 
-    # Resolve product UUID — handle both UUID strings and legacy SKUs
-    try:
-        product_uuid = _uuid.UUID(product_id)
-    except ValueError:
-        async with db_connection() as conn:
-            row = await conn.fetchrow(
-                "SELECT product_id FROM store.products WHERE sku = $1 LIMIT 1",
-                product_id,
-            )
-        if row is None:
-            raise ValueError(f"Product '{product_id}' not found by SKU")
-        product_uuid = row["product_id"]
+    # Resolve product UUID by name
+    async with db_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT product_id FROM store.products WHERE LOWER(name) = LOWER($1) LIMIT 1",
+            product_name,
+        )
+    if row is None:
+        raise ValueError(f"Product '{product_name}' not found by name")
+    product_uuid = row["product_id"]
 
     session_uuid = _uuid.UUID(session_id) if session_id else None
 
@@ -68,7 +65,7 @@ async def restock_product(product_id: str, quantity: int) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["action_executor"])
 async def apply_discount(
     product_ids: list[str], discount_pct: float, duration_hours: int
 ) -> dict:
@@ -114,15 +111,16 @@ async def apply_discount(
     }
 
 
-@tool
-async def pause_campaign(campaign_id: str, reason: str) -> dict:
+@safe_tool(agents=["action_executor"])
+async def pause_campaign(campaign_name: str, reason: str= "User query") -> dict:
     """
     Pauses an active marketing campaign.
     Args:
-        campaign_id: the external campaign identifier (e.g. 'CAMP_042')
+        campaign_name: the name of the campaign to pause (case-insensitive match)
         reason: human-readable reason for pausing
-    Returns dict with keys: status, campaign_id, paused_at
+    Returns dict with keys: status, campaign_id, campaign_name, paused_at, reason
     """
+    print(f"pause camp: {campaign_name}, {reason}")
     async with db_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -132,22 +130,24 @@ async def pause_campaign(campaign_id: str, reason: str) -> dict:
                 paused_at     = NOW(),
                 paused_reason = $2,
                 updated_at    = NOW()
-            WHERE external_id = $1
-            RETURNING campaign_id, status, paused_at
+            WHERE LOWER(name) = LOWER($1)
+              AND status = 'active'
+            RETURNING campaign_id, external_id, name, status, paused_at
             """,
-            campaign_id, reason,
+            campaign_name, reason,
         )
     if row is None:
-        raise ValueError(f"Campaign '{campaign_id}' not found")
+        raise ValueError(f"Active campaign named '{campaign_name}' not found")
     return {
         "status": "success",
-        "campaign_id": campaign_id,
+        "campaign_id": str(row["campaign_id"]),
+        "campaign_name": row["name"],
         "paused_at": row["paused_at"].isoformat(),
         "reason": reason,
     }
 
 
-@tool
+@safe_tool(agents=["action_executor"])
 async def create_support_ticket(
     issue_description: str, priority: str = "medium"
 ) -> dict:
@@ -185,7 +185,7 @@ async def create_support_ticket(
     }
 
 
-@tool
+@safe_tool(agents=["action_executor"])
 async def relaunch_campaign(campaign_id: str) -> dict:
     """
     Relaunches (activates) a paused or inactive marketing campaign.
@@ -216,33 +216,32 @@ async def relaunch_campaign(campaign_id: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["action_executor"])
 async def launch_campaign(
     name: str,
     channel: str = "paid_search",
     budget: float = 1000.0,
-    product_ids: list[str] | None = None,
+    product_names: list[str] | None = None,
     discount_pct: float | None = None,
     duration_hours: int = 168,
 ) -> dict:
     """
     Creates a brand-new marketing campaign and optionally applies a product discount.
     Args:
-        name: campaign name (e.g. 'laptop_new')
+        name: campaign name
         channel: one of 'paid_search','social_ads','email','organic','display','affiliate'
         budget: campaign budget in dollars
-        product_ids: optional list of product UUID strings or SKUs to discount
+        product_names: optional list of product names to link to this campaign (e.g. ['Laptop Pro 15'])
         discount_pct: optional discount percentage (e.g. 15.0 for 15%)
         duration_hours: campaign duration in hours (default 168 = 7 days)
     Returns dict with keys: status, campaign_id, external_id, name, channel, budget,
-        start_date, end_date, promo_id (if discount applied)
+        start_date, end_date, products_linked (list), promo_id (if discount applied)
     """
     _VALID_CHANNELS = {
         "paid_search", "social_ads", "email", "organic", "display", "affiliate"
     }
     if channel not in _VALID_CHANNELS:
         channel = "paid_search"
-
     session_id = current_session_id.get() or None
     session_uuid = _uuid.UUID(session_id) if session_id else None
 
@@ -268,38 +267,51 @@ async def launch_campaign(
             end_date,
         )
 
+    campaign_uuid = campaign_row["campaign_id"]
     result: dict = {
         "status": "success",
-        "campaign_id": str(campaign_row["campaign_id"]),
+        "campaign_id": str(campaign_uuid),
         "external_id": campaign_row["external_id"],
         "name": campaign_row["name"],
         "channel": campaign_row["channel"],
         "budget": float(campaign_row["budget"]),
         "start_date": campaign_row["start_date"].isoformat(),
         "end_date": campaign_row["end_date"].isoformat(),
+        "products_linked": [],
     }
+    # Resolve product names to UUIDs, link in campaign_products, optionally create promotion
+    
+    if product_names:
+        resolved_product_uuids: list[str] = []
 
-    # Optionally apply a discount promotion for associated products
-    if product_ids and discount_pct is not None:
-        promo_id = f"PROMO-{now.strftime('%Y%m%d%H%M%S')}"
-        expires_at = now + timedelta(hours=duration_hours)
+        for pname in product_names:
+            async with db_connection() as conn:
+                row = await conn.fetchrow(
+                    "SELECT product_id FROM store.products WHERE LOWER(name) = LOWER($1) AND is_active = TRUE LIMIT 1",
+                    pname,
+                )
+            if row:
+                resolved_product_uuids.append(str(row["product_id"]))
 
-        # Resolve SKUs to UUIDs where needed
-        resolved_ids = []
-        for pid in product_ids:
-            try:
-                _uuid.UUID(pid)
-                resolved_ids.append(pid)
-            except ValueError:
-                async with db_connection() as conn:
-                    row = await conn.fetchrow(
-                        "SELECT product_id FROM store.products WHERE sku = $1 LIMIT 1",
-                        pid,
-                    )
-                if row:
-                    resolved_ids.append(str(row["product_id"]))
+        # Write to store.campaign_products (campaign_id UUID, product_id UUID)
+        for product_uuid_str in resolved_product_uuids:
+            async with db_connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO store.campaign_products (campaign_id, product_id)
+                    VALUES ($1::uuid, $2::uuid)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    campaign_uuid,
+                    _uuid.UUID(product_uuid_str),
+                )
 
-        if resolved_ids:
+        result["products_linked"] = resolved_product_uuids
+        # Optionally apply a discount promotion
+        if discount_pct is not None and resolved_product_uuids:
+            promo_id = f"PROMO-{now.strftime('%Y%m%d%H%M%S')}"
+            expires_at = now + timedelta(hours=duration_hours)
+
             async with db_connection() as conn:
                 promo_row = await conn.fetchrow(
                     """
@@ -310,13 +322,14 @@ async def launch_campaign(
                     RETURNING promo_id, expires_at
                     """,
                     promo_id,
-                    json.dumps(resolved_ids),
+                    json.dumps(resolved_product_uuids),
                     discount_pct,
                     duration_hours,
                     now,
                     expires_at,
                     session_uuid,
                 )
+            print(result)
             result["promo_id"] = promo_row["promo_id"]
             result["discount_pct"] = discount_pct
             result["promo_expires_at"] = promo_row["expires_at"].isoformat()

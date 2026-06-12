@@ -6,12 +6,12 @@ All functions are async and query the store schema via the shared asyncpg pool.
 
 from datetime import date as _date
 
-from langchain.tools import tool
+from tools.registry import safe_tool
 
 from db.connection import db_connection
 
 
-@tool
+@safe_tool(agents=["support"])
 async def get_complaint_volume(date: str) -> dict:
     """
     Returns customer complaint volume and breakdown by category for a given date.
@@ -52,7 +52,7 @@ async def get_complaint_volume(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["support"])
 async def get_review_sentiment(date: str) -> dict:
     """
     Returns aggregated customer review sentiment for a given date.
@@ -89,7 +89,7 @@ async def get_review_sentiment(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["support"])
 async def get_common_issues(date: str, top_n: int = 5) -> dict:
     """
     Returns the most common customer-reported issues for a given date.
@@ -143,7 +143,7 @@ async def get_common_issues(date: str, top_n: int = 5) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["support"])
 def get_refund_rate(date: str) -> dict:
     """
     Returns refund and return rate metrics for a given date.
@@ -161,7 +161,7 @@ def get_refund_rate(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["support"])
 def get_review_sentiment(date: str) -> dict:
     """
     Returns aggregated customer review sentiment for a given date.
@@ -186,7 +186,7 @@ def get_review_sentiment(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["support"])
 def get_common_issues(date: str, top_n: int = 5) -> dict:
     """
     Returns the most common customer-reported issues for a given date.

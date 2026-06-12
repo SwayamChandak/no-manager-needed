@@ -3,7 +3,7 @@ mcp_server/server.py — FastMCP server entry point.
 
 Exposes four MCP tools to any MCP-compatible client (Claude Code, Copilot, etc.).
 All intelligence is in the LangGraph graph — this file is a pure adapter.
-Transport: stdio (Claude Code / local), SSE (web clients).
+Transport: SSE on port settings.mcp_server_port. Started via `python -m mcp_server`.
 """
 
 from fastmcp import FastMCP

@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     hitl_api_port: int = 8001
     hitl_timeout_seconds: int = 300
 
+    # Server ports
+    mcp_server_port: int = 8000
+    app_server_port: int = 8002
+    mcp_server_url: str = "http://127.0.0.1:8000/sse"
+
     # Agent behaviour
     reflection_confidence_threshold: float = 0.4
     max_reflection_retries: int = 2

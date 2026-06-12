@@ -7,7 +7,7 @@ The @tool decorator from langchain supports async def natively.
 
 from datetime import date as _date
 
-from langchain.tools import tool
+from tools.registry import safe_tool
 
 from db.connection import db_connection
 
@@ -15,7 +15,7 @@ from db.connection import db_connection
 _GRANULARITY_MAP = {"hourly": "hour", "daily": "day"}
 
 
-@tool
+@safe_tool(agents=["sales"])
 async def get_revenue_timeseries(date: str, granularity: str = "hourly") -> dict:
     """
     Returns revenue timeseries for a given date.
@@ -52,7 +52,7 @@ async def get_revenue_timeseries(date: str, granularity: str = "hourly") -> dict
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 async def get_order_volume(date: str) -> dict:
     """
     Returns total order count and breakdown by hour for a given date.
@@ -90,7 +90,7 @@ async def get_order_volume(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 async def get_revenue_by_product(date: str, top_n: int = 5) -> dict:
     """
     Returns revenue broken down by product for a given date.
@@ -133,7 +133,7 @@ async def get_revenue_by_product(date: str, top_n: int = 5) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 async def get_revenue_by_region(date: str) -> dict:
     """
     Returns revenue broken down by customer region for a given date.
@@ -169,7 +169,7 @@ async def get_revenue_by_region(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 async def detect_anomaly(date: str) -> dict:
     """
     Detects whether revenue on the given date is anomalous vs the 7-day rolling average.
@@ -252,7 +252,7 @@ async def detect_anomaly(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 def get_order_volume(date: str) -> dict:
     """
     Returns total order count and breakdown by hour for a given date.
@@ -277,7 +277,7 @@ def get_order_volume(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 def get_revenue_by_product(date: str, top_n: int = 10) -> dict:
     """
     Returns revenue broken down by product for a given date.
@@ -330,7 +330,7 @@ def get_revenue_by_product(date: str, top_n: int = 10) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 def get_revenue_by_region(date: str) -> dict:
     """
     Returns revenue broken down by geographic region for a given date.
@@ -349,7 +349,7 @@ def get_revenue_by_region(date: str) -> dict:
     }
 
 
-@tool
+@safe_tool(agents=["sales"])
 def detect_anomaly(metric: str, date: str) -> dict:
     """
     Runs anomaly detection on a given metric for a given date.
