@@ -182,14 +182,42 @@ async def chat_stream(request: ChatRequest):
         "orchestrator_node", "sales_node", "inventory_node",
         "marketing_node", "support_node", "aggregator_node",
         "reflection_node", "hitl_node", "action_executor_node",
-        "memory_writer_node", "output_formatter_node",
+        "memory_writer_node", "recall_node", "output_formatter_node",
     })
 
     async def event_generator():
         yield f"data: {_json.dumps({'type': 'intent_classified', 'intent': intent})}\n\n"
 
-        initial_state = _build_stream_state(request.message, session_id, intent)
         node_start_times: dict = {}
+
+        # ── Recall: bypass graph, call MCP recall tool directly ────────────
+        if intent == "recall":
+            from mcp_server.mcp_tools import recall as _mcp_recall
+            try:
+                yield f"data: {_json.dumps({'type': 'node_start', 'node': 'recall_node', 'input_preview': {'query': request.message[:120], 'intent': 'recall'}})}\n\n"
+                t0 = asyncio.get_event_loop().time()
+                result = await _mcp_recall(scenario_description=request.message)
+                duration_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
+                yield f"data: {_json.dumps({'type': 'node_end', 'node': 'recall_node', 'duration_ms': duration_ms})}\n\n"
+                result_payload = {
+                    "type": "result",
+                    "session_id": result.get("session_id", session_id),
+                    "finding": result.get("summary", "No incidents found."),
+                    "incidents": result.get("incidents", []),
+                    "root_causes": [],
+                    "confidence": 0.0,
+                    "supporting_data": {},
+                    "recommended_actions": [],
+                    "proposed_actions": [],
+                    "status": "completed",
+                }
+                yield f"data: {_json.dumps(result_payload, default=str)}\n\n"
+            except Exception as exc:
+                import traceback
+                yield f"data: {_json.dumps({'type': 'error', 'message': str(exc), 'detail': traceback.format_exc()[:500]})}\n\n"
+            return
+
+        initial_state = _build_stream_state(request.message, session_id, intent)
 
         try:
             async for event in graph.astream_events(initial_state, config=config, version="v2"):

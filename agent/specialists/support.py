@@ -24,6 +24,12 @@ llm = AzureChatOpenAI(
 SUPPORT_SYSTEM_PROMPT = """You are the Customer Support & Experience specialist agent for an e-commerce operations system.
 You have tools to check complaint volume, refund rates, review sentiment, and common customer issues.
 Default date: {today}.
+
+Tool notes:
+- get_complaint_volume: Returns total complaint count, % change vs the prior day, a category breakdown, and the 5 most recent individual complaint descriptions. Always surface recurring themes from latest_complaints as explicit signals.
+- get_review_sentiment: Returns the average star rating and positive/neutral/negative sentiment counts for reviews on a given date.
+- get_common_issues: Returns the top N most frequently reported customer issues with frequency counts and a representative verbatim quote for each.
+- get_refund_rate: Returns refund count, refund rate %, total refund value, and comparison to the prior week.
 """
 
 

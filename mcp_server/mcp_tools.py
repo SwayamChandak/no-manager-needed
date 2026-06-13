@@ -77,7 +77,7 @@ async def diagnose(question: str, session_id: str) -> dict:
     """
     initial_state = _build_initial_state(question, session_id, "diagnose")
     result = await graph.ainvoke(initial_state, config=_graph_config(session_id))
-
+    print("diagnose called")
     # Safety net: if graph suspended at HITL (should not happen for diagnose intent),
     # return a clear message instead of "No finding generated."
     diag_snapshot = graph.get_state(_graph_config(session_id))
@@ -142,7 +142,7 @@ async def fix(
     """
     session_id = session_id or str(uuid.uuid4())
     config = _graph_config(session_id)
-
+    print("fix called")
     if resume:
         # Resume the suspended graph with the human decision
         approval_payload = {
@@ -200,10 +200,13 @@ async def fix(
             summary=final_response.explanation if final_response else "Actions executed.",
         ).model_dump()
 
-    except Exception:
-        # Graph hit interrupt() — surfaces as GraphInterrupt exception in some LangGraph versions.
-        # The graph is now suspended. Read the proposed actions from the checkpoint.
+    except Exception as exc:
+        # Graph hit interrupt() — surfaces as GraphInterrupt in some LangGraph versions.
+        # Verify the graph actually suspended before treating this as HITL.
         snapshot = graph.get_state(config)
+        if not (snapshot and snapshot.next):
+            # Not a HITL interrupt — re-raise as a real error
+            raise
         proposed = snapshot.values.get("proposed_actions", [])
         hitl_store.register(session_id, [a.model_dump() for a in proposed])
 
@@ -233,6 +236,7 @@ async def recall(scenario_description: str, top_k: int = 3) -> dict:
 
     Returns a list of past incidents with root causes, actions taken, and outcomes.
     """
+    print("recall called")
     session_id = str(uuid.uuid4())
     records = long_term_memory.search_similar(scenario_description, top_k=top_k)
 

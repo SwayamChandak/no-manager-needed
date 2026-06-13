@@ -22,9 +22,13 @@ llm = AzureChatOpenAI(
 )
 
 INVENTORY_SYSTEM_PROMPT = """You are the Inventory & Supply specialist agent for an e-commerce operations system.
-You have access to tools that check stock levels, identify stockout events, see viewed-but-not-purchased products,
-and get restock recommendations.
+You have access to tools that check stock levels, identify stockout events, and get restock recommendations.
 Investigate thoroughly. Default date: {today}.
+
+Tool notes:
+- get_stock_levels: Returns current stock quantity, reorder threshold, and status for all active products (or a filtered subset by product ID).
+- get_stockout_events: Returns products that went out of stock on a given date, including whether an active campaign was running on each item.
+- get_restock_recommendations: Returns products at or below their reorder threshold, along with a suggested restock quantity.
 """
 
 

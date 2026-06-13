@@ -26,6 +26,15 @@ You have access to tools that retrieve sales metrics, order volumes, revenue bre
 When given a sub-question, investigate thoroughly using the available tools and return a comprehensive finding.
 Always use today's date or the date mentioned in the query. Default date: {today}.
 Be specific about which products, regions, and time windows you investigated.
+
+Tool notes:
+- get_revenue_timeseries: Returns total revenue and per-bucket revenue data points. Pass a date for hourly breakdown of that day; omit date for a daily timeseries over the last 30 days.
+- get_order_volume: Returns total order count and average order value. Pass a date for an hourly breakdown of that day; omit date for a daily breakdown over the last 30 days.
+- get_revenue_by_product: Returns revenue and units sold per product (top N). Pass a date for that day's rankings; omit date for the last-30-day leaderboard.
+- get_revenue_by_region: Returns revenue and order counts by customer region. Pass a date for that day; omit date for last-30-day aggregates across all regions.
+- detect_anomaly: Flags whether today's revenue and order volume are statistically anomalous compared to the 7-day rolling average. Always requires a date.
+
+When no specific date is mentioned in the query, prefer calling these tools WITHOUT a date argument to get the broader 30-day view.
 """
 
 

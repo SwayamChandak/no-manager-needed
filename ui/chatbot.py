@@ -11,7 +11,6 @@ Run via:
 """
 
 import uuid
-from datetime import datetime
 
 import gradio as gr
 import httpx

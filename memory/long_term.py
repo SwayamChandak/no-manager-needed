@@ -73,14 +73,14 @@ class LongTermMemory:
     def search_similar(self, query: str, top_k: int = 3) -> List[IncidentRecord]:
         """Return the top-k most semantically similar past incidents."""
         vector = embeddings.embed_query(query)
-        results = self._client.search(
+        response = self._client.query_points(
             collection_name=self._collection,
-            query_vector=vector,
+            query=vector,
             limit=top_k,
             with_payload=True,
         )
         records = []
-        for hit in results:
+        for hit in response.points:
             try:
                 records.append(IncidentRecord(**hit.payload))
             except Exception:
@@ -175,6 +175,43 @@ def run_memory_writer(state: OpsAgentState) -> dict:
             "incident_id": record.incident_id,
             "timestamp": datetime.utcnow().isoformat(),
         }]
+    }
+
+
+# ---------------------------------------------------------------------------
+# LangGraph node function — recall
+# ---------------------------------------------------------------------------
+def run_recall_node(state: OpsAgentState) -> dict:
+    """
+    Recall node — skips all specialists.
+    Searches Qdrant for past incidents similar to the user query and
+    populates retrieved_memories in state for the output formatter.
+    """
+    query = state.get("user_query", "")
+    records = long_term_memory.search_similar(query, top_k=5)
+
+    incidents = [
+        PastIncident(
+            incident_id=r.incident_id,
+            timestamp=r.timestamp,
+            query=r.query,
+            intent=r.intent,
+            root_causes=r.root_causes,
+            actions_proposed=r.actions_proposed,
+            actions_executed=r.actions_executed,
+            outcome_summary=r.outcome_summary,
+        )
+        for r in records
+    ]
+
+    return {
+        "retrieved_memories": incidents,
+        "tool_call_log": [{
+            "node": "recall_node",
+            "status": "success",
+            "matches_found": len(incidents),
+            "timestamp": datetime.utcnow().isoformat(),
+        }],
     }
 
 

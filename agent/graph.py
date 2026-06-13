@@ -34,18 +34,21 @@ from agent.output_formatter import run_output_formatter as output_formatter_node
 
 
 from memory.long_term import run_memory_writer as memory_writer_node
+from memory.long_term import run_recall_node as recall_node
 
 
 # ---------------------------------------------------------------------------
 # Conditional edge functions — pure functions of state, no side effects.
 # ---------------------------------------------------------------------------
 
-def route_to_specialists(state: OpsAgentState) -> list[Send]:
+def route_to_specialists(state: OpsAgentState) -> list[Send] | str:
     """Fan out to only the active specialists via Send().
 
-    Reads state["active_specialists"]; defaults to all four if absent.
-    Returns a list of Send() objects — one per active specialist.
+    For 'recall' intent: short-circuits directly to recall_node (no specialists).
+    For all other intents: fans out to active specialists via Send().
     """
+    if state.get("intent") == "recall":
+        return "recall_node"
     specialist_map = {
         "sales": "sales_node",
         "inventory": "inventory_node",
@@ -101,6 +104,7 @@ def build_graph() -> CompiledStateGraph:
     builder.add_node("hitl_node", hitl_node)
     builder.add_node("action_executor_node", action_executor_node)
     builder.add_node("memory_writer_node", memory_writer_node)
+    builder.add_node("recall_node", recall_node)
     builder.add_node("output_formatter_node", output_formatter_node)
 
     # ------------------------------------------------------------------
@@ -116,8 +120,11 @@ def build_graph() -> CompiledStateGraph:
     builder.add_conditional_edges(
         "orchestrator_node",
         route_to_specialists,
-        ["sales_node", "inventory_node", "marketing_node", "support_node"],
+        ["sales_node", "inventory_node", "marketing_node", "support_node", "recall_node"],
     )
+
+    # Recall short-circuit: skip specialists, aggregator, reflection, hitl
+    builder.add_edge("recall_node", "output_formatter_node")
 
     # ------------------------------------------------------------------
     # All specialists converge on aggregator

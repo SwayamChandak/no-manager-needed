@@ -9,7 +9,6 @@ Usage:
 """
 
 import asyncio
-import json
 import random
 import uuid
 from datetime import date, datetime, timedelta, timezone

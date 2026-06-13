@@ -76,7 +76,6 @@ def _build_aggregator_output_text(output: AggregatorOutput) -> str:
     The Root Cause Quality metric checks for cross-domain connections, ranked
     root causes, and proposed actions — passing only output.summary omits those.
     """
-    import json as _json
 
     lines: list[str] = [f"Summary: {output.summary}"]
 
@@ -114,7 +113,7 @@ def _build_aggregator_output_text(output: AggregatorOutput) -> str:
         ]
         if linked:
             lines.append("\nCross-domain links detected:")
-            lines.extend(f"  • {l}" for l in linked)
+            lines.extend(f"  • {link}" for link in linked)
 
     return "\n".join(lines)
 

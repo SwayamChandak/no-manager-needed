@@ -24,6 +24,14 @@ llm = AzureChatOpenAI(
 MARKETING_SYSTEM_PROMPT = """You are the Marketing & Campaigns specialist agent for an e-commerce operations system.
 You have tools to check campaign performance, channel breakdowns, paused campaigns, and promotion schedules.
 Default date: {today}.
+
+Tool notes:
+- get_campaign_performance: Returns spend, impressions, clicks, conversions, revenue, and ROAS per campaign. Pass a date for that day's metrics; omit date for all-time aggregated totals per campaign.
+- get_channel_breakdown: Returns aggregate spend, revenue, and ROAS grouped by marketing channel. Pass a date for that day's channel split; omit date for all-time channel totals.
+- get_paused_campaigns: Returns paused campaigns with the timestamp and reason. Pass a date to filter to campaigns paused on that specific day; omit date to return all campaigns currently in 'paused' status.
+- get_promotion_schedule: Returns all currently active or upcoming promotions with their discount %, affected product IDs, and start/end times. No date parameter.
+
+When no specific date is mentioned in the query, call tools WITHOUT a date argument to get the broadest available view.
 """
 
 

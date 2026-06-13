@@ -16,17 +16,42 @@ _GRANULARITY_MAP = {"hourly": "hour", "daily": "day"}
 
 
 @safe_tool(agents=["sales"])
-async def get_revenue_timeseries(date: str, granularity: str = "hourly") -> dict:
+async def get_revenue_timeseries(date: str | None = None, granularity: str = "daily") -> dict:
     """
-    Returns revenue timeseries for a given date.
+    Returns revenue timeseries for a given date, or the last 30 days if no date is provided.
     Args:
-        date: ISO date string e.g. '2025-01-15'
-        granularity: 'hourly' or 'daily'
-    Returns dict with keys: date, granularity, total (float), data_points (list of {time, revenue})
+        date: ISO date string e.g. '2025-01-15' (optional — omit for last-30-day view)
+        granularity: 'hourly' or 'daily' (default 'daily' when no date; 'hourly' when date given)
+    Returns dict with keys: date_range or date, granularity, total (float), data_points (list of {time, revenue})
     """
     trunc_unit = _GRANULARITY_MAP.get(granularity)
     if trunc_unit is None:
         raise ValueError(f"granularity must be one of {list(_GRANULARITY_MAP)}")
+
+    if date is None:
+        sql = f"""
+            SELECT
+                DATE_TRUNC('{trunc_unit}', created_at AT TIME ZONE 'UTC') AS bucket,
+                SUM(total_amount) AS revenue
+            FROM store.orders
+            WHERE created_at AT TIME ZONE 'UTC' >= NOW() - INTERVAL '30 days'
+              AND status = 'completed'
+            GROUP BY bucket
+            ORDER BY bucket
+        """
+        async with db_connection() as conn:
+            rows = await conn.fetch(sql)
+        total = sum(float(r["revenue"]) for r in rows)
+        return {
+            "date_range": "last_30_days",
+            "granularity": granularity,
+            "total": total,
+            "data_points": [
+                {"time": r["bucket"].isoformat(), "revenue": float(r["revenue"])}
+                for r in rows
+            ],
+        }
+
     _date_val = _date.fromisoformat(date)
     sql = f"""
         SELECT
@@ -53,13 +78,48 @@ async def get_revenue_timeseries(date: str, granularity: str = "hourly") -> dict
 
 
 @safe_tool(agents=["sales"])
-async def get_order_volume(date: str) -> dict:
+async def get_order_volume(date: str | None = None) -> dict:
     """
-    Returns total order count and breakdown by hour for a given date.
+    Returns total order count and breakdown by period.
+    If date is given, breaks down by hour for that day.
+    If date is omitted, returns daily order totals and overall avg order value for the last 30 days.
     Args:
-        date: ISO date string e.g. '2025-01-15'
-    Returns dict with keys: date, total_orders (int), avg_order_value (float), hourly_breakdown (list)
+        date: ISO date string (optional — omit for last-30-day view)
+    Returns dict with keys: date or date_range, total_orders (int), avg_order_value (float),
+        hourly_breakdown (when date given) or daily_breakdown (when omitted)
     """
+    if date is None:
+        sql = """
+            SELECT
+                DATE(created_at AT TIME ZONE 'UTC') AS day,
+                COUNT(order_id) AS orders,
+                AVG(total_amount) AS avg_value
+            FROM store.orders
+            WHERE created_at AT TIME ZONE 'UTC' >= NOW() - INTERVAL '30 days'
+            GROUP BY day
+            ORDER BY day
+        """
+        async with db_connection() as conn:
+            rows = await conn.fetch(sql)
+        total_orders = sum(int(r["orders"]) for r in rows)
+        overall_avg = (
+            sum(float(r["avg_value"] or 0) * int(r["orders"]) for r in rows) / total_orders
+            if total_orders else 0.0
+        )
+        return {
+            "date_range": "last_30_days",
+            "total_orders": total_orders,
+            "avg_order_value": round(overall_avg, 2),
+            "daily_breakdown": [
+                {
+                    "day": r["day"].isoformat(),
+                    "orders": int(r["orders"]),
+                    "avg_value": round(float(r["avg_value"] or 0), 2),
+                }
+                for r in rows
+            ],
+        }
+
     _date_val = _date.fromisoformat(date)
     sql = """
         SELECT
@@ -91,14 +151,47 @@ async def get_order_volume(date: str) -> dict:
 
 
 @safe_tool(agents=["sales"])
-async def get_revenue_by_product(date: str, top_n: int = 5) -> dict:
+async def get_revenue_by_product(date: str | None = None, top_n: int = 5) -> dict:
     """
-    Returns revenue broken down by product for a given date.
+    Returns revenue broken down by product for a given date, or the last 30 days if no date is given.
     Args:
-        date: ISO date string
+        date: ISO date string (optional — omit for last-30-day view)
         top_n: number of top products to return
-    Returns dict with keys: date, products (list of {product_id, name, revenue, units_sold, pct_of_total})
+    Returns dict with keys: date or date_range, products (list of {product_id, name, revenue, units_sold, pct_of_total})
     """
+    if date is None:
+        sql = """
+            SELECT
+                p.product_id,
+                p.name,
+                SUM(oi.subtotal) AS revenue,
+                SUM(oi.quantity) AS units_sold
+            FROM store.order_items oi
+            JOIN store.orders o ON o.order_id = oi.order_id
+            JOIN store.products p ON p.product_id = oi.product_id
+            WHERE o.created_at AT TIME ZONE 'UTC' >= NOW() - INTERVAL '30 days'
+              AND o.status = 'completed'
+            GROUP BY p.product_id, p.name
+            ORDER BY revenue DESC
+            LIMIT $1
+        """
+        async with db_connection() as conn:
+            rows = await conn.fetch(sql, top_n)
+        total_rev = sum(float(r["revenue"]) for r in rows)
+        return {
+            "date_range": "last_30_days",
+            "products": [
+                {
+                    "product_id": str(r["product_id"]),
+                    "name": r["name"],
+                    "revenue": float(r["revenue"]),
+                    "units_sold": int(r["units_sold"]),
+                    "pct_of_total": round(float(r["revenue"]) / total_rev * 100, 1) if total_rev else 0.0,
+                }
+                for r in rows
+            ],
+        }
+
     _date_val = _date.fromisoformat(date)
     sql = """
         SELECT
@@ -134,13 +227,40 @@ async def get_revenue_by_product(date: str, top_n: int = 5) -> dict:
 
 
 @safe_tool(agents=["sales"])
-async def get_revenue_by_region(date: str) -> dict:
+async def get_revenue_by_region(date: str | None = None) -> dict:
     """
-    Returns revenue broken down by customer region for a given date.
+    Returns revenue broken down by customer region for a given date, or the last 30 days if no date is given.
     Args:
-        date: ISO date string
-    Returns dict with keys: date, regions (list of {region, revenue, orders})
+        date: ISO date string (optional — omit for last-30-day view)
+    Returns dict with keys: date or date_range, regions (list of {region, revenue, orders})
     """
+    if date is None:
+        sql = """
+            SELECT
+                c.region,
+                SUM(o.total_amount) AS revenue,
+                COUNT(o.order_id) AS orders
+            FROM store.orders o
+            JOIN store.customers c ON c.customer_id = o.customer_id
+            WHERE o.created_at AT TIME ZONE 'UTC' >= NOW() - INTERVAL '30 days'
+              AND o.status = 'completed'
+            GROUP BY c.region
+            ORDER BY revenue DESC
+        """
+        async with db_connection() as conn:
+            rows = await conn.fetch(sql)
+        return {
+            "date_range": "last_30_days",
+            "regions": [
+                {
+                    "region": r["region"],
+                    "revenue": float(r["revenue"]),
+                    "orders": int(r["orders"]),
+                }
+                for r in rows
+            ],
+        }
+
     _date_val = _date.fromisoformat(date)
     sql = """
         SELECT
@@ -225,150 +345,4 @@ async def detect_anomaly(date: str) -> dict:
         "avg_revenue": avg_rev,
         "today_orders": today_orders,
         "avg_orders": avg_orders,
-    }
-
-    """
-    Returns revenue timeseries for a given date.
-    Args:
-        date: ISO date string e.g. '2025-01-15'
-        granularity: 'hourly' or 'daily'
-    Returns dict with keys: date, total (float), data_points (list of {time, revenue})
-    """
-    return {
-        "date": date,
-        "granularity": granularity,
-        "total": 8750.0,
-        "data_points": [
-            {"time": "09:00", "revenue": 2100.0},
-            {"time": "10:00", "revenue": 2300.0},
-            {"time": "11:00", "revenue": 980.0},
-            {"time": "12:00", "revenue": 650.0},
-            {"time": "13:00", "revenue": 420.0},
-            {"time": "14:00", "revenue": 310.0},
-            {"time": "15:00", "revenue": 890.0},
-            {"time": "16:00", "revenue": 1100.0},
-        ],
-        "note": "Significant drop observed after 11:00",
-    }
-
-
-@safe_tool(agents=["sales"])
-def get_order_volume(date: str) -> dict:
-    """
-    Returns total order count and breakdown by hour for a given date.
-    Args:
-        date: ISO date string e.g. '2025-01-15'
-    Returns dict with keys: date, total_orders (int), avg_order_value (float), hourly_breakdown (list)
-    """
-    return {
-        "date": date,
-        "total_orders": 143,
-        "avg_order_value": 61.2,
-        "hourly_breakdown": [
-            {"hour": "09:00", "orders": 34},
-            {"hour": "10:00", "orders": 41},
-            {"hour": "11:00", "orders": 28},
-            {"hour": "12:00", "orders": 17},
-            {"hour": "13:00", "orders": 11},
-            {"hour": "14:00", "orders": 7},
-            {"hour": "15:00", "orders": 5},
-        ],
-        "note": "Order volume dropped 70% after 11:00 vs prior day average of 38/hr",
-    }
-
-
-@safe_tool(agents=["sales"])
-def get_revenue_by_product(date: str, top_n: int = 10) -> dict:
-    """
-    Returns revenue broken down by product for a given date.
-    Args:
-        date: ISO date string
-        top_n: number of top products to return
-    Returns dict with keys: date, products (list of {product_id, name, revenue, units_sold, pct_of_total})
-    """
-    return {
-        "date": date,
-        "products": [
-            {
-                "product_id": "P001",
-                "name": "Laptop Pro 15",
-                "revenue": 0.0,
-                "units_sold": 0,
-                "pct_of_total": 0.0,
-                "note": "Out of stock from 11:30",
-            },
-            {
-                "product_id": "P002",
-                "name": "Wireless Mouse",
-                "revenue": 1840.0,
-                "units_sold": 92,
-                "pct_of_total": 21.0,
-            },
-            {
-                "product_id": "P003",
-                "name": "USB-C Hub",
-                "revenue": 1560.0,
-                "units_sold": 78,
-                "pct_of_total": 17.8,
-            },
-            {
-                "product_id": "P004",
-                "name": "Mechanical Keyboard",
-                "revenue": 0.0,
-                "units_sold": 0,
-                "pct_of_total": 0.0,
-                "note": "Out of stock from 10:45",
-            },
-            {
-                "product_id": "P005",
-                "name": 'Monitor 27"',
-                "revenue": 2100.0,
-                "units_sold": 14,
-                "pct_of_total": 24.0,
-            },
-        ],
-    }
-
-
-@safe_tool(agents=["sales"])
-def get_revenue_by_region(date: str) -> dict:
-    """
-    Returns revenue broken down by geographic region for a given date.
-    Args:
-        date: ISO date string
-    Returns dict with keys: date, regions (list of {region, revenue, orders, pct_change_vs_prior_week})
-    """
-    return {
-        "date": date,
-        "regions": [
-            {"region": "North", "revenue": 3200.0, "orders": 52, "pct_change_vs_prior_week": -18.0},
-            {"region": "South", "revenue": 2800.0, "orders": 45, "pct_change_vs_prior_week": -12.0},
-            {"region": "East", "revenue": 1500.0, "orders": 28, "pct_change_vs_prior_week": -41.0},
-            {"region": "West", "revenue": 1250.0, "orders": 18, "pct_change_vs_prior_week": -35.0},
-        ],
-    }
-
-
-@safe_tool(agents=["sales"])
-def detect_anomaly(metric: str, date: str) -> dict:
-    """
-    Runs anomaly detection on a given metric for a given date.
-    Args:
-        metric: one of 'revenue', 'orders', 'aov' (average order value)
-        date: ISO date string
-    Returns dict with keys: metric, date, is_anomaly (bool), severity ('low'|'medium'|'high'),
-        deviation_pct (float), explanation
-    """
-    return {
-        "metric": metric,
-        "date": date,
-        "is_anomaly": True,
-        "severity": "high",
-        "deviation_pct": -38.5,
-        "explanation": (
-            f"{metric} is 38.5% below the 30-day rolling average. "
-            "This is a statistically significant drop (>3 sigma)."
-        ),
-        "baseline_30d_avg": 14200.0,
-        "observed_value": 8750.0,
     }

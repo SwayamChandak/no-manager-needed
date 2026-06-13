@@ -12,13 +12,53 @@ from db.connection import db_connection
 
 
 @safe_tool(agents=["support"])
-async def get_complaint_volume(date: str) -> dict:
+async def get_complaint_volume(date: str | None = None) -> dict:
     """
-    Returns customer complaint volume and breakdown by category for a given date.
+    Returns customer complaint volume and breakdown by category.
+    If date is provided, filters to that day and includes % change vs prior day.
+    If date is omitted, returns the all-time total and latest 5 complaints across all dates.
     Args:
-        date: ISO date string
-    Returns dict with keys: date, total_complaints, pct_change_vs_prior_day, categories (list)
+        date: ISO date string (optional). Omit to get all-time totals.
+    Returns dict with keys: date, total_complaints, pct_change_vs_prior_day (only when date given),
+        categories (list), latest_complaints (list of 5 most recent)
     """
+    if date is None:
+        all_time_sql = """
+            SELECT category, COUNT(*) AS count
+            FROM store.complaints
+            WHERE type = 'complaint'
+            GROUP BY category
+            ORDER BY count DESC
+        """
+        latest_sql = """
+            SELECT id, category, description, created_at
+            FROM store.complaints
+            WHERE type = 'complaint'
+            ORDER BY created_at DESC
+            LIMIT 5
+        """
+        async with db_connection() as conn:
+            rows = await conn.fetch(all_time_sql)
+            latest_rows = await conn.fetch(latest_sql)
+        total = sum(int(r["count"]) for r in rows)
+        return {
+            "date": "all-time",
+            "total_complaints": total,
+            "categories": [
+                {"category": r["category"], "count": int(r["count"])}
+                for r in rows
+            ],
+            "latest_complaints": [
+                {
+                    "id": r["id"],
+                    "category": r["category"],
+                    "description": r["description"] or "",
+                    "created_at": r["created_at"].isoformat(),
+                }
+                for r in latest_rows
+            ],
+        }
+
     _date_val = _date.fromisoformat(date)
     today_sql = """
         SELECT category, COUNT(*) AS count
@@ -34,9 +74,18 @@ async def get_complaint_volume(date: str) -> dict:
         WHERE type = 'complaint'
           AND DATE(created_at AT TIME ZONE 'UTC') = $1::date - 1
     """
+    latest_sql = """
+        SELECT id, category, description, created_at
+        FROM store.complaints
+        WHERE type = 'complaint'
+          AND DATE(created_at AT TIME ZONE 'UTC') = $1::date
+        ORDER BY created_at DESC
+        LIMIT 5
+    """
     async with db_connection() as conn:
         rows = await conn.fetch(today_sql, _date_val)
         prior_total = int(await conn.fetchval(prior_sql, _date_val) or 0)
+        latest_rows = await conn.fetch(latest_sql, _date_val)
     total = sum(int(r["count"]) for r in rows)
     pct_change = (
         round(((total - prior_total) / prior_total) * 100, 1) if prior_total else 0.0
@@ -48,6 +97,15 @@ async def get_complaint_volume(date: str) -> dict:
         "categories": [
             {"category": r["category"], "count": int(r["count"])}
             for r in rows
+        ],
+        "latest_complaints": [
+            {
+                "id": r["id"],
+                "category": r["category"],
+                "description": r["description"] or "",
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in latest_rows
         ],
     }
 
@@ -158,66 +216,4 @@ def get_refund_rate(date: str) -> dict:
         "total_refund_value": 2340.0,
         "vs_prior_week_pct": 88.0,
         "top_reason": "item_unavailable_after_order",
-    }
-
-
-@safe_tool(agents=["support"])
-def get_review_sentiment(date: str) -> dict:
-    """
-    Returns aggregated customer review sentiment for a given date.
-    Args:
-        date: ISO date string
-    Returns dict with keys: date, avg_rating, sentiment_breakdown, notable_themes (list of strings)
-    """
-    return {
-        "date": date,
-        "avg_rating": 2.8,
-        "vs_prior_week_avg": 4.1,
-        "sentiment_breakdown": {
-            "positive": 18,
-            "neutral": 9,
-            "negative": 31,
-        },
-        "notable_themes": [
-            "Products showing as available but out of stock",
-            "Orders cancelled after payment",
-            "Disappointed with Summer Tech Sale — items gone",
-        ],
-    }
-
-
-@safe_tool(agents=["support"])
-def get_common_issues(date: str, top_n: int = 5) -> dict:
-    """
-    Returns the most common customer-reported issues for a given date.
-    Args:
-        date: ISO date string
-        top_n: number of top issues to return
-    Returns dict with keys: date, issues (list of {issue, frequency, representative_quote})
-    """
-    return {
-        "date": date,
-        "issues": [
-            {
-                "issue": "Laptop Pro 15 shown as available but out of stock",
-                "frequency": 22,
-                "representative_quote": (
-                    "I added it to cart and paid, then got a cancellation email."
-                ),
-            },
-            {
-                "issue": "Summer Tech Sale items unavailable",
-                "frequency": 15,
-                "representative_quote": (
-                    "The sale page is live but nothing is actually in stock."
-                ),
-            },
-            {
-                "issue": "Order cancelled without prior notice",
-                "frequency": 11,
-                "representative_quote": (
-                    "Very frustrating experience, lost trust in the store."
-                ),
-            },
-        ],
     }
