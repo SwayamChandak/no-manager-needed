@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     langsmith_project: str = "default"
 
     # Qdrant vector store
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = "http://localhost:6334"
     qdrant_api_key: Optional[str] = None
     qdrant_collection: str = "incident_memory"
 

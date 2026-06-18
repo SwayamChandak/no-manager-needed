@@ -7,7 +7,10 @@ from deepeval.test_case import LLMTestCase
 
 from agent.state import OpsAgentState, StructuredResponse
 from config import settings
-from eval.deepeval_setup import output_formatter_metrics
+try:
+    from eval.deepeval_setup import output_formatter_metrics
+except ModuleNotFoundError:
+    output_formatter_metrics = None
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,
@@ -30,6 +33,7 @@ def run_output_formatter(state: OpsAgentState) -> dict:
     retrieved_memories = state.get("retrieved_memories", [])
     intent = state.get("intent", "diagnose")
     reflection_notes = state.get("reflection_notes", [])
+    hitl_rejection_reason = state.get("hitl_rejection_reason")
 
     import json as _json
 
@@ -96,6 +100,29 @@ def run_output_formatter(state: OpsAgentState) -> dict:
                 lines.append(f"  API response: {resp_str}")
         context_parts.append("Actions executed:\n" + "\n".join(lines))
 
+    if hitl_rejection_reason:
+        context_parts.append(
+            f"Human operator REJECTED all proposed actions. Reason given: \"{hitl_rejection_reason}\""
+        )
+    elif intent == "fix" and not executed_actions and proposed_actions:
+        context_parts.append(
+            "Human operator REJECTED all proposed actions. No reason was provided."
+        )
+
+    if retrieved_memories:
+        lines = []
+        for mem in retrieved_memories:
+            lines.append(f"- Incident: '{mem.query}' (intent: {mem.intent}, recorded: {mem.timestamp})")
+            if mem.root_causes:
+                lines.append("  Root causes: " + "; ".join(mem.root_causes))
+            if mem.actions_proposed:
+                lines.append("  Actions proposed: " + "; ".join(mem.actions_proposed))
+            if mem.actions_executed:
+                lines.append("  Actions executed: " + "; ".join(mem.actions_executed))
+            if mem.outcome_summary:
+                lines.append(f"  Outcome: {mem.outcome_summary}")
+        context_parts.append("Similar past incidents retrieved from memory:\n" + "\n".join(lines))
+
     if reflection_notes and any("[MAX RETRIES" in n for n in reflection_notes):
         context_parts.append(
             "Note: Analysis completed with limited confidence due to data gaps."
@@ -109,42 +136,51 @@ def run_output_formatter(state: OpsAgentState) -> dict:
             "NO actions have been executed. Do NOT say actions were 'initiated', 'submitted', or 'taken'. "
             "If there are recommended actions in the context, present them as suggestions or next steps only."
         )
+    elif intent == "recall":
+        intent_instruction = (
+            "This is a RECALL query — the user wants to understand what happened in similar past incidents. "
+            "Your report must be grounded entirely in the 'Similar past incidents' data provided. "
+            "For each incident: describe the situation, what caused it, what actions were taken, and the outcome. "
+            "Conclude with a pattern analysis: what do these incidents have in common and what lessons apply to the current situation. "
+            "Do NOT invent data not present in the incidents. Do NOT say any current actions were taken."
+        )
     elif intent == "fix":
         if executed_actions:
             intent_instruction = (
                 "This is a FIX query. Actions were approved by a human and executed. "
-                "Report what was found AND what was done. "
-                "If actions show status 'success', confirm they were executed successfully. "
-                "If status 'failed', say those actions could not be completed."
+                "Report comprehensively: (1) what was found and the root causes, (2) what actions were proposed, "
+                "(3) what was actually executed and the outcome for each action. "
+                "If actions show status 'success', confirm they were executed successfully with specific details. "
+                "If status 'failed', say those actions could not be completed and why."
             )
         else:
             intent_instruction = (
-                "This is a FIX query but no actions were executed (they may have been rejected). "
-                "Report only what was found. Do NOT say actions were taken."
+                "This is a FIX query. All proposed actions were REJECTED by the human operator. "
+                "Write a comprehensive report that covers: (1) what was found and the root causes identified, "
+                "(2) what actions were proposed and why they were recommended, "
+                "(3) the rejection decision — include the operator's stated reason if one was provided. "
+                "Do NOT say any actions were taken or executed."
             )
     else:
         intent_instruction = "Report the findings clearly and concisely."
 
     explanation_prompt = (
-        "Write a clear, well-structured business operations report in **Markdown format**. "
-        "The entire response must be valid Markdown so it renders correctly in any Markdown viewer.\n\n"
-        "Structure the report with the following sections (use `##` headings):\n\n"
-        "## What Happened\n"
-        "A summary of the key issue or situation observed.\n\n"
-        "## Root Cause Analysis\n"
-        "Why it happened — the root causes and how the different signals (sales, inventory, marketing, support) connect.\n\n"
-        "## Recommended Next Steps\n"
-        "Concrete actions the business should take (or, if actions were already executed, what was done and the outcome).\n\n"
-        "**Markdown table rules — add a table wherever the data benefits from comparison or tabulation:**\n"
-        "- Multiple products with metrics (sales, stock, revenue, etc.) → table with Product, Metric columns\n"
-        "- Multiple campaigns with performance data → table with Campaign, Channel, Budget, Status columns\n"
-        "- Support complaints by category or priority → table with Category/Issue, Count, Priority columns\n"
-        "- Root causes with confidence scores → table with Root Cause, Confidence, Supporting Domains columns\n"
-        "- Executed or recommended actions → table with Action, Parameters, Status/Impact columns\n"
-        "Only add a table when there are 2+ rows of comparable data; skip tables for single items.\n\n"
+        "Write a clear business operations report in plain prose. "
+        "Do NOT use any markdown formatting: no # headings, no ** bold **, no * italic *, "
+        "no bullet points, no hyphens as list markers, no backticks. "
+        "Use plain paragraph breaks to separate sections. "
+        "Label each section with a short plain-text heading on its own line "
+        "(e.g. 'What Happened', 'Root Cause Analysis', 'Next Steps'), but do not mark it up in any way.\n\n"
+        "Tables are the ONLY exception. Use a plain pipe-separated table (with a header row and a "
+        "separator row of dashes) when you have 2 or more rows of comparable data, such as:\n"
+        "- Multiple products with sales or stock metrics\n"
+        "- Multiple campaigns with performance data\n"
+        "- Multiple executed or recommended actions with status or impact\n"
+        "- Root causes with confidence scores\n"
+        "Skip the table and write a sentence instead when there is only one row of data.\n\n"
         f"{intent_instruction}\n\n"
-        "Be specific throughout: use actual product names, quantities, campaign names, percentages, and metric values "
-        "from the data provided — do NOT use vague phrases like 'several products' or 'some items'.\n\n"
+        "Be specific: use actual product names, quantities, campaign names, percentages, and metric values "
+        "from the data. Do not use vague phrases like 'several products' or 'some items'.\n\n"
         f"{context}"
     )
 

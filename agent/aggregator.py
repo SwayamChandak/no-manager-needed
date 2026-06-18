@@ -7,7 +7,10 @@ from deepeval.test_case import LLMTestCase
 
 from agent.state import AggregatorOutput, OpsAgentState
 from config import settings
-from eval.deepeval_setup import aggregator_metrics
+try:
+    from eval.deepeval_setup import aggregator_metrics
+except ModuleNotFoundError:
+    aggregator_metrics = None
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,

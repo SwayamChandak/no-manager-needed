@@ -10,7 +10,10 @@ from deepeval.test_case import LLMTestCase
 
 from agent.state import OpsAgentState, SpecialistFinding
 from config import settings
-from eval.deepeval_setup import support_metrics
+try:
+    from eval.deepeval_setup import support_metrics
+except ModuleNotFoundError:
+    support_metrics = None
 from tools.registry import get_tools_for_agent
 
 llm = AzureChatOpenAI(

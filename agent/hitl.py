@@ -41,6 +41,12 @@ async def run_hitl(state: OpsAgentState) -> dict:
         else None
     )
 
+    rejection_reason = (
+        approval_response.get("comment")
+        if isinstance(approval_response, dict)
+        else None
+    )
+
     if approved:
         if modified_actions:
             approved_list = [ProposedAction(**a) for a in modified_actions]
@@ -49,14 +55,18 @@ async def run_hitl(state: OpsAgentState) -> dict:
     else:
         approved_list = []
 
-    return {
+    result: dict = {
         "approved_actions": approved_list,
         "tool_call_log": [
             {
                 "node": "hitl",
                 "approved": approved,
                 "actions_approved_count": len(approved_list),
+                "rejection_reason": rejection_reason,
                 "timestamp": datetime.utcnow().isoformat(),
             }
         ],
     }
+    if not approved:
+        result["hitl_rejection_reason"] = rejection_reason
+    return result

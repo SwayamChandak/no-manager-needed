@@ -7,7 +7,11 @@ from deepeval.test_case import LLMTestCase
 
 from agent.state import OpsAgentState, OrchestratorDecision, SubQuestion
 from config import settings
-from eval.deepeval_setup import orchestrator_metrics
+
+try:
+    from eval.deepeval_setup import orchestrator_metrics
+except ModuleNotFoundError:
+    orchestrator_metrics = None
 
 llm = AzureChatOpenAI(
     azure_endpoint=settings.azure_openai_endpoint,

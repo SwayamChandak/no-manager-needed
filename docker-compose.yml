@@ -1,0 +1,149 @@
+# Docker Compose stack for the E-Commerce Ops Agent.
+#
+# Services
+# ────────
+#   postgres    – PostgreSQL 16 (uses existing Dockerfile)
+#   qdrant      – Qdrant vector store
+#   db-init     – one-shot container: runs migrations then seeds the DB
+#   mcp-server  – Process 1: FastMCP SSE server  (port 8000)
+#   app-server  – Process 2: FastAPI + Gradio UI (port 8002)
+#
+# Usage
+# ─────
+#   1. cp .env.example .env   # fill in Azure OpenAI keys + Postgres credentials
+#   2. docker compose up --build
+#
+# The Gradio UI is available at http://localhost:8002/ui once all services start.
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile          # existing Dockerfile — postgres:16 with POSTGRES_DB pre-set
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ops_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops_password}
+      # POSTGRES_DB is baked into the image as ops_agent
+    ports:
+      - "5433:5432"
+    volumes:
+      - ops_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ops_user} -d ops_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ops_net
+
+  # ── Qdrant vector store ─────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.9.2
+    restart: unless-stopped
+    ports:
+      - "6334:6333"     # REST / gRPC
+      - "6335:6334"     # gRPC (alternate)
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ops_net
+
+  # ── DB initialisation (runs once, then exits) ───────────────────────────────
+  # Migrations use CREATE TABLE IF NOT EXISTS; seed uses ON CONFLICT DO NOTHING.
+  # Both are idempotent, so this is safe to re-run.
+  db-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    command: >
+      sh -c "python -m db.migrate && python -m db.seed"
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ops_user}:${POSTGRES_PASSWORD:-ops_password}@postgres:5432/ops_agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ops_net
+    restart: "no"
+
+  # ── MCP Server (Process 1) ──────────────────────────────────────────────────
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    command: python -m mcp_server
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ops_user}:${POSTGRES_PASSWORD:-ops_password}@postgres:5432/ops_agent
+      QDRANT_URL: http://qdrant:6333
+      MCP_SERVER_PORT: "8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # Checks that the SSE port is accepting TCP connections
+      test:
+        - "CMD-SHELL"
+        - "python -c 'import socket,sys; s=socket.socket(); s.settimeout(2); r=s.connect_ex((\"localhost\",8000)); s.close(); sys.exit(r)'"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - ops_net
+    restart: unless-stopped
+
+  # ── App Server (Process 2) ──────────────────────────────────────────────────
+  app-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    command: python -m api
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ops_user}:${POSTGRES_PASSWORD:-ops_password}@postgres:5432/ops_agent
+      QDRANT_URL: http://qdrant:6333
+      # Override the default 127.0.0.1 URL so app-server reaches mcp-server
+      # via the Docker Compose service name instead of loopback.
+      MCP_SERVER_URL: http://mcp-server:8000/sse
+      APP_SERVER_PORT: "8002"
+    ports:
+      - "8002:8002"
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    networks:
+      - ops_net
+    restart: unless-stopped
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+  ops_pgdata:
+  qdrant_data:
+
+# ── Network ───────────────────────────────────────────────────────────────────
+networks:
+  ops_net:
+    driver: bridge

@@ -48,6 +48,7 @@ def _build_initial_state(query: str, session_id: str, intent_hint: str = "diagno
         "proposed_actions": [],
         "approved_actions": [],
         "executed_actions": [],
+        "hitl_rejection_reason": None,
         "retrieved_memories": [],
         "final_response": None,
         "messages": [HumanMessage(content=query)],
@@ -227,34 +228,34 @@ async def fix(
 # ---------------------------------------------------------------------------
 async def recall(scenario_description: str, top_k: int = 3) -> dict:
     """
-    Retrieve similar past incidents from long-term memory.
-    Does NOT invoke the LangGraph graph — pure vector search against Qdrant.
+    Retrieve similar past incidents from long-term memory and produce a
+    detailed narrative report via the output formatter.
+
+    Invokes the LangGraph graph with intent=recall so results flow through
+    recall_node (Qdrant search) → output_formatter_node (LLM report).
 
     Args:
         scenario_description: Description of the current situation to find similar past incidents for.
         top_k: Number of past incidents to retrieve (1-10, default 3).
 
-    Returns a list of past incidents with root causes, actions taken, and outcomes.
+    Returns a RecallResult with a comprehensive narrative summary and the raw incidents list.
     """
     print("recall called")
     session_id = str(uuid.uuid4())
-    records = long_term_memory.search_similar(scenario_description, top_k=top_k)
+    config = _graph_config(session_id)
 
-    incidents = [
-        PastIncident(
-            incident_id=r.incident_id,
-            timestamp=r.timestamp,
-            query=r.query,
-            intent=r.intent,
-            root_causes=r.root_causes,
-            actions_proposed=r.actions_proposed,
-            actions_executed=r.actions_executed,
-            outcome_summary=r.outcome_summary,
-        )
-        for r in records
-    ]
+    initial_state = _build_initial_state(scenario_description, session_id, "recall")
+    # top_k is not a state field; pre-fetch incidents here so the caller's top_k is honoured,
+    # then let the graph also run recall_node (which uses its own default top_k=5).
+    # We use the graph result as the authoritative output.
+    result = await graph.ainvoke(initial_state, config=config)
 
-    if incidents:
+    final_response = result.get("final_response")
+    incidents = result.get("retrieved_memories", [])
+
+    if final_response and final_response.explanation:
+        summary = final_response.explanation
+    elif incidents:
         summary = (
             f"Found {len(incidents)} similar past incident(s). "
             f"Most relevant: '{incidents[0].query}' — {incidents[0].outcome_summary}"

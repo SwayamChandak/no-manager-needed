@@ -1,0 +1,39 @@
+# Never include secrets or unnecessary files in the Docker build context.
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python cache / bytecode
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+
+# Virtual environments
+.venv
+venv
+env
+
+# Secrets — must not be baked into the image
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+*.egg-info
+dist/
+build/
+
+# Test / eval artefacts
+.pytest_cache
+<!-- eval/ -->
+
+# Editor / OS artefacts
+.vscode
+.idea
+*.DS_Store
+Thumbs.db

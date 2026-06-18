@@ -139,6 +139,7 @@ class OpsAgentState(TypedDict):
     proposed_actions: List[ProposedAction]
     approved_actions: List[ProposedAction]
     executed_actions: List[ExecutedAction]
+    hitl_rejection_reason: Optional[str]
 
     # Memory
     retrieved_memories: List[PastIncident]

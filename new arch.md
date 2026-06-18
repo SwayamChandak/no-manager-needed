@@ -98,3 +98,50 @@ graph TB
 - **Reflection loop** — feeds back to the orchestrator on failure, advances to HITL on pass.
 - **HITL cross-process** — the App Server's HITL API calls `graph.ainvoke(Command(resume=...))` directly, bypassing the MCP Server, because the checkpoint lives in PostgreSQL.
 - **memory_writer_node** — only on the `action_executor → memory_writer → output_formatter` path; never triggered for read-only intents.
+
+---
+
+## Architecture Review Q&A
+
+### Is the architecture correct?
+
+Yes, the overall structure is sound. The two-process split (MCP Server + App Server), shared PostgreSQL checkpoint for cross-process HITL resume, Qdrant for vector memory, and the LangGraph StateGraph topology are all coherent and follow established patterns for production agentic systems.
+
+One gap worth noting: the `recall` MCP tool queries Qdrant directly (bypassing the graph), but the `recall_node` inside the graph is only reachable via `diagnose` or `summarize`. These are two separate recall paths — make sure this is intentional and that both paths use the same `search_similar` logic, otherwise they can diverge.
+
+---
+
+### Who decides the queries for each specialist agent?
+
+**The orchestrator decides everything above the specialist level.** There are two distinct layers:
+
+1. **Orchestrator LLM** (`orchestrator.py`) — on every invocation it:
+   - Classifies `intent` (`diagnose`, `fix`, `recall`, `summarize`)
+   - Selects which subset of the 4 specialists are relevant
+   - **Generates a specific, tailored sub-question for each selected specialist** (e.g. `[SALES_SUBQUESTION] Did revenue drop on 2026-06-12 and in which product categories?`)
+   - Injects those tagged `HumanMessage` objects into `state["messages"]`
+
+2. **Specialist ReAct loops** (`specialists/*.py`) — each specialist only decides **which tools to call** (and with what parameters) to answer the sub-question the orchestrator already wrote for it. The sub-question itself is not composed by the specialist.
+
+   Each specialist scans `state["messages"]` for its own tag (e.g. `[SALES_SUBQUESTION]`) to extract its assigned question. If no tag is found it falls back to the raw `user_query` — which is a fallback, not the intended path.
+
+**On reflection re-entry**, the orchestrator generates *refined* follow-up sub-questions only for the specialists that had gaps, so the loop is also orchestrator-driven.
+
+**Implication:** if the user asks a pure inventory question the orchestrator will set `active_specialists = ["inventory"]` and only that specialist runs — not all 4. The fan-out is selective, not always-4.
+
+---
+
+**Bug found in code (not in diagram):** `orchestrator.py` does not write `decision.intent` back to state. It returns `active_specialists`, `messages`, and `tool_call_log`, but omits `"intent": decision.intent`. The `intent` field is only set by `_build_initial_state` in the MCP tool (as `intent_hint`). This means if the orchestrator LLM reclassifies the intent differently from the MCP tool's hint, the routing logic (`route_after_hitl`, `route_to_specialists`) will use the stale initial value. Fix: add `"intent": decision.intent` to the `return` dict in `_run_orchestrator_impl`.
+
+---
+
+### Are only 4 tools exposed to the MCP client, and is this format correct?
+
+Yes — exactly 4 tools are exposed: `diagnose`, `fix`, `summarize`, `recall`. This is the correct design pattern.
+
+**Why this is right:**
+- The MCP client (the App Server / Gradio UI) expresses **intent**, not implementation. It doesn't need to know about `analytics.py`, `crm.py`, etc. Those are internal to the graph.
+- Exposing individual low-level tools (inventory lookup, campaign fetch, etc.) to the MCP client would make the client responsible for orchestration — defeating the purpose of the agentic system.
+- The 4 tools map cleanly to the 4 user-facing intents. The graph handles all routing, specialist selection, reflection, and HITL internally.
+
+**The only exception** is `recall`, which bypasses the graph entirely — this is a deliberate optimization (pure retrieval, no reasoning needed). That is a valid and common pattern.

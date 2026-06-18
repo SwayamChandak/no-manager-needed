@@ -54,6 +54,20 @@ def _graph_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
+def _extract_explanation(final_state: Any) -> str:
+    """Pull final_response.explanation out of the graph's terminal state dict."""
+    if not isinstance(final_state, dict):
+        return ""
+    fr = final_state.get("final_response")
+    if fr is None:
+        return ""
+    if hasattr(fr, "explanation"):
+        return fr.explanation or ""
+    if isinstance(fr, dict):
+        return fr.get("explanation", "")
+    return ""
+
+
 def _get_pending_state(session_id: str) -> dict:
     """Read proposed actions from the live graph checkpoint."""
     try:
@@ -126,12 +140,13 @@ async def approve(
     }
 
     try:
-        await graph.ainvoke(Command(resume=approval_payload), config=config)
+        final_state = await graph.ainvoke(Command(resume=approval_payload), config=config)
         hitl_store.remove(session_id)
+        explanation = _extract_explanation(final_state)
         return ActionResponse(
             session_id=session_id,
             status="executed",
-            message="Actions approved and executed successfully.",
+            message=explanation or "Actions approved and executed successfully.",
             timestamp=datetime.utcnow().isoformat(),
         )
     except Exception as exc:
@@ -155,12 +170,13 @@ async def reject(
     }
 
     try:
-        await graph.ainvoke(Command(resume=rejection_payload), config=config)
+        final_state = await graph.ainvoke(Command(resume=rejection_payload), config=config)
         hitl_store.remove(session_id)
+        explanation = _extract_explanation(final_state)
         return ActionResponse(
             session_id=session_id,
             status="rejected",
-            message=f"Actions rejected. Reason: {request.reason or 'No reason provided.'}",
+            message=explanation or f"Actions rejected. Reason: {request.reason or 'No reason provided.'}",
             timestamp=datetime.utcnow().isoformat(),
         )
     except Exception as exc:
@@ -190,12 +206,13 @@ async def modify_and_approve(
     }
 
     try:
-        await graph.ainvoke(Command(resume=approval_payload), config=config)
+        final_state = await graph.ainvoke(Command(resume=approval_payload), config=config)
         hitl_store.remove(session_id)
+        explanation = _extract_explanation(final_state)
         return ActionResponse(
             session_id=session_id,
             status="executed",
-            message=(
+            message=explanation or (
                 f"Modified action plan approved and executed "
                 f"({len(request.modified_actions)} actions)."
             ),
