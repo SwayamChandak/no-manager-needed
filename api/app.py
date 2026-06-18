@@ -2,7 +2,7 @@
 api/app.py — Combined App Server FastAPI application (Process 2).
 
 Mounts:
-  /ui   → Gradio chatbot (ui/chatbot.py)
+  /ui   → React SPA (ui-react/build/)
   /hitl → HITL approval endpoints (api/hitl_api.py)
   POST /chat → MCP proxy to Process 1 (MCP Server)
 
@@ -11,11 +11,12 @@ Run via `python -m api`.
 
 import json as _json
 import asyncio
+import os
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import gradio as gr
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI as _AzureChatOpenAI
 
@@ -67,11 +68,48 @@ OUT-OF-SCOPE topics (reject these):
 
 If IN-SCOPE, reply with exactly one word from: diagnose, fix, recall, summarize
 
-Intent definitions:
-- diagnose: investigate, understand, or analyse an e-commerce issue
-- fix: explicitly take a corrective action (restock, launch campaign, apply discount, create ticket)
-- recall: ask about past incidents or similar historical events
-- summarize: request a high-level business health summary
+INTENT DEFINITIONS (read carefully — pick the FIRST that applies in this order):
+
+1. fix — The user explicitly asks you to TAKE a corrective action NOW.
+   Trigger words: restock, launch, apply, create, set, enable, refund, cancel, send.
+   Examples:
+   - "Restock the blue widgets."
+   - "Launch a discount campaign for shoes."
+   - "Create a support ticket for this customer."
+
+2. summarize — The user wants a high-level overview of overall business health.
+   Trigger phrases: "how's the business", "give me an overview", "overall status", "summary of everything".
+   Examples:
+   - "Give me a summary of how the store is doing."
+   - "What's the overall health of operations this week?"
+
+3. recall — The user asks about a SPECIFIC, ALREADY-RESOLVED PAST incident or wants to
+   find historical precedents/patterns to compare against. This is about looking up the
+   archive of closed events, NOT about current data.
+   Key signal: references a prior known event, "last time", "have we seen this before",
+   "similar incidents", "in the past when X happened".
+   Examples:
+   - "Have we had a stockout like this before?"
+   - "What happened last time we ran a flash sale?"
+   - "Find past incidents similar to this conversion drop."
+
+4. diagnose — The DEFAULT. The user wants to investigate, understand, analyze, or get
+   the CURRENT state of an ongoing e-commerce situation. Use this for any question that
+   asks WHAT, WHY, or HOW about present/recent operational data, even if it uses words
+   like "recent" or "lately".
+   Examples:
+   - "What have the recent complaints been about?"   -> diagnose
+   - "How are our marketing campaigns performing?"    -> diagnose
+   - "Why did sales drop this week?"                  -> diagnose
+   - "What's our current stock level on widgets?"     -> diagnose
+
+DISAMBIGUATION RULES:
+- "recent", "lately", "this week", "currently" describe CURRENT operations -> diagnose, NOT recall.
+- recall ONLY applies when the user explicitly points to a closed/historical incident or
+  asks for comparison with past events ("before", "last time", "previously", "similar past cases").
+- If a message both asks to understand AND to act, prefer fix only if an action verb is present;
+  otherwise diagnose.
+- When in doubt between diagnose and recall, choose diagnose.
 
 If OUT-OF-SCOPE, reply with exactly: REJECTED: <one concise sentence explaining the assistant only handles e-commerce ops topics such as sales, inventory, marketing, and customer support>
 
@@ -248,9 +286,9 @@ async def chat_stream(request: ChatRequest):
 
 
 # ---------------------------------------------------------------------------
-# Mount Gradio UI
+# Serve React UI build
 # ---------------------------------------------------------------------------
 
-from ui.chatbot import demo as gradio_demo  # noqa: E402
-
-app = gr.mount_gradio_app(app, gradio_demo, path="/ui")
+_react_build = os.path.join(os.path.dirname(__file__), "..", "ui-react", "build")
+if os.path.isdir(_react_build):
+    app.mount("/ui", StaticFiles(directory=_react_build, html=True), name="ui")

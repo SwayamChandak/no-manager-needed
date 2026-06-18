@@ -6,14 +6,15 @@
 #   qdrant      – Qdrant vector store
 #   db-init     – one-shot container: runs migrations then seeds the DB
 #   mcp-server  – Process 1: FastMCP SSE server  (port 8000)
-#   app-server  – Process 2: FastAPI + Gradio UI (port 8002)
+#   app-server  – Process 2: FastAPI backend      (port 8002)
+#   ui-react    – Process 3: React UI via nginx   (port 3000)
 #
 # Usage
 # ─────
 #   1. cp .env.example .env   # fill in Azure OpenAI keys + Postgres credentials
 #   2. docker compose up --build
 #
-# The Gradio UI is available at http://localhost:8002/ui once all services start.
+# The React UI is available at http://localhost:3000 once all services start.
 
 services:
 
@@ -133,6 +134,28 @@ services:
       - "8002:8002"
     depends_on:
       mcp-server:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c 'import socket,sys; s=socket.socket(); s.settimeout(2); r=s.connect_ex((\"localhost\",8002)); s.close(); sys.exit(r)'"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - ops_net
+    restart: unless-stopped
+
+  # ── React UI (Process 3) ───────────────────────────────────────────────────
+  ui-react:
+    build:
+      context: ./ui-react
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      app-server:
         condition: service_healthy
     networks:
       - ops_net

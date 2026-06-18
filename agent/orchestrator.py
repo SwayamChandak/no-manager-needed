@@ -28,10 +28,24 @@ Your job is to parse the user's question and decide:
 3. A specific sub-question for each relevant specialist to investigate
 
 Intent definitions:
-- diagnose: user wants to understand the current state OR why something happened. Use this for ANY query that asks "what", "which", "how many", "show me", "list", "name", "identify", or "why". This is the default for all read-only investigative questions.
-- fix: user EXPLICITLY wants the system to take a corrective action using keywords like "fix", "restock", "apply discount", "pause", "launch a campaign", "resolve", "correct it". Do NOT use this for queries that just ask for information about problems.
-- recall: user is asking about past incidents ("what happened last time", "has this occurred before")
-- summarize: user wants a high-level business health summary ("summarize yesterday", "executive summary")
+
+- fix: Use ONLY when the user is explicitly requesting that an action be performed or a change be made.
+  Trigger words: "fix", "restock", "apply", "launch", "pause", "resolve", "correct", "update", "change", "set", "send", "create", "delete", "run".
+  Example: "restock item X", "apply a 10% discount to Y", "pause campaign Z", "fix the low inventory issue".
+  Do NOT use "fix" for queries that merely describe a problem or ask for information about one.
+
+- diagnose: Use when the user wants information, analysis, or an explanation about the current state of the business — even if they mention a problem.
+  This is the default for all read-only questions. Includes: "what is", "which products", "how many", "show me", "list", "identify", "why is X happening", "what's wrong with", "what are the top", "who are the customers", "tell me about".
+  Example: "which products have low inventory?", "why are sales down?", "what are my top customers?", "show me underperforming campaigns".
+
+- recall: Use ONLY when the user is asking about a PAST INCIDENT and what actions were taken to handle it — i.e. querying the memory/incident log, not live store data.
+  Key signals: "last time", "what did we do when", "what was done when", "has this happened before", "how did we handle", "what steps did we take when".
+  Example: "what did we do last time inventory was low?", "how did we handle the last sales drop?", "has this issue occurred before and how was it resolved?".
+  Do NOT use "recall" for questions about recent or historical store data (sales figures, complaints, orders) — those are read-only data queries and must use "diagnose".
+  Example of what is NOT recall: "what have the recent complaints been about?", "what were last week's sales?", "show me complaints from this month" — these are "diagnose".
+
+- summarize: Use when the user wants a high-level overview or business health summary, not a deep diagnosis.
+  Example: "summarize yesterday", "give me an executive summary", "weekly overview", "how did we do this week".
 
 Rules for specialist routing:
 - "diagnose" or "fix" with cross-domain question → all 4 specialists
