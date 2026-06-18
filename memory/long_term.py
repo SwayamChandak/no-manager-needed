@@ -188,7 +188,18 @@ def run_recall_node(state: OpsAgentState) -> dict:
     populates retrieved_memories in state for the output formatter.
     """
     query = state.get("user_query", "")
-    records = long_term_memory.search_similar(query, top_k=5)
+    try:
+        records = long_term_memory.search_similar(query, top_k=5)
+    except Exception as e:
+        return {
+            "retrieved_memories": [],
+            "tool_call_log": [{
+                "node": "recall_node",
+                "status": "failed",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat(),
+            }],
+        }
 
     incidents = [
         PastIncident(

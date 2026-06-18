@@ -33,6 +33,7 @@ Tool notes:
 - get_channel_breakdown: Returns aggregate spend, revenue, and ROAS grouped by marketing channel. Pass a date for that day's channel split; omit date for all-time channel totals.
 - get_paused_campaigns: Returns paused campaigns with the timestamp and reason. Pass a date to filter to campaigns paused on that specific day; omit date to return all campaigns currently in 'paused' status.
 - get_promotion_schedule: Returns all currently active or upcoming promotions with their discount %, affected product IDs, and start/end times. No date parameter.
+- get_campaign_status_breakdown: Returns a count, total budget, and total spend grouped by campaign status (active, paused, completed, cancelled). Use this to understand the overall health and distribution of campaigns. No parameters.
 
 When no specific date is mentioned in the query, call tools WITHOUT a date argument to get the broadest available view.
 """

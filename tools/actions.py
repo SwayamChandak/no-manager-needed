@@ -186,12 +186,12 @@ async def create_support_ticket(
 
 
 @safe_tool(agents=["action_executor"])
-async def relaunch_campaign(campaign_id: str) -> dict:
+async def relaunch_campaign(campaign_name: str) -> dict:
     """
     Relaunches (activates) a paused or inactive marketing campaign.
     Args:
-        campaign_id: the external campaign identifier (e.g. 'CAMP_042')
-    Returns dict with keys: status, campaign_id, relaunched_at
+        campaign_name: the display name of the campaign (case-insensitive match against store.campaigns.name)
+    Returns dict with keys: status, campaign_name, relaunched_at
     """
     async with db_connection() as conn:
         row = await conn.fetchrow(
@@ -202,16 +202,16 @@ async def relaunch_campaign(campaign_id: str) -> dict:
                 paused_at  = NULL,
                 paused_reason = NULL,
                 updated_at = NOW()
-            WHERE external_id = $1
-            RETURNING campaign_id, status, updated_at
+            WHERE LOWER(name) = LOWER($1)
+            RETURNING campaign_id, name, status, updated_at
             """,
-            campaign_id,
+            campaign_name,
         )
     if row is None:
-        raise ValueError(f"Campaign '{campaign_id}' not found")
+        raise ValueError(f"Campaign '{campaign_name}' not found")
     return {
         "status": "success",
-        "campaign_id": campaign_id,
+        "campaign_name": row["name"],
         "relaunched_at": row["updated_at"].isoformat(),
     }
 
@@ -287,8 +287,17 @@ async def launch_campaign(
         for pname in product_names:
             async with db_connection() as conn:
                 row = await conn.fetchrow(
-                    "SELECT product_id FROM store.products WHERE LOWER(name) = LOWER($1) AND is_active = TRUE LIMIT 1",
-                    pname,
+                    """
+                    SELECT product_id FROM store.products
+                    WHERE (
+                        LOWER(name) = LOWER($1)
+                        OR LOWER(sku) = LOWER($1)
+                        OR (product_id::text = $1)
+                    )
+                    AND is_active = TRUE
+                    LIMIT 1
+                    """,
+                    str(pname),
                 )
             if row:
                 resolved_product_uuids.append(str(row["product_id"]))

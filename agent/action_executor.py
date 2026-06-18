@@ -53,6 +53,9 @@ async def run_action_executor(state: OpsAgentState) -> dict:
             if action_type == "pause_campaign":
                 if "campaign_id" in params and "campaign_name" not in params:
                     params["campaign_name"] = params.pop("campaign_id")
+            elif action_type == "relaunch_campaign":
+                if "campaign_id" in params and "campaign_name" not in params:
+                    params["campaign_name"] = params.pop("campaign_id")
             elif action_type == "launch_campaign":
                 if "product_ids" in params and "product_names" not in params:
                     params["product_names"] = params.pop("product_ids")

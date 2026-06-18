@@ -25,7 +25,7 @@ You receive findings from up to 4 specialist agents (sales, inventory, marketing
 Your job:
 1. Build a correlation matrix — for each pair of domains present, determine if their signals are causally linked (yes/no + explanation)
 2. Rank root causes by confidence (0.0-1.0), citing which domains support each cause
-3. Propose 1-3 concrete actions based on the findings
+3. Optionally propose actions — ONLY if a finding directly maps to one of the available action tools listed below. If no tool is applicable, leave proposed_actions as an empty array [].
 
 Specialist findings:
 {findings_text}
@@ -50,26 +50,42 @@ Return structured output matching this schema:
       "evidence": ["signal 1", "signal 2"]
     }}
   ],
-  "proposed_actions": [
-    {{
-      "action_type": "restock|apply_discount|pause_campaign|relaunch_campaign|launch_campaign|create_ticket",
-      "parameters": "{{\"key\": \"value\"}}",
-      "justification": "...",
-      "estimated_impact": "..."
-    }}
-  ],
+  "proposed_actions": [],
   "summary": "One paragraph summary of what happened and why."
 }}
 
-Action type reference — use ONLY these exact strings:
-- "restock": submit a restock order. parameters: {{"product_name": "the exact product name", "quantity": N}}
-- "apply_discount": apply a temporary discount. parameters: {{"product_ids": ["..."], "discount_pct": N, "duration_hours": N}}
-- "pause_campaign": pause an active campaign by its name. parameters: {{"campaign_name": "COPY the 'name' field VERBATIM from the raw tool data — do NOT paraphrase, abbreviate, or guess. Example: if raw tool data shows \"name\": \"Summer Tech Sale\", use \"Summer Tech Sale\" exactly.", "reason": "..."}}
-- "relaunch_campaign": reactivate a paused or inactive campaign. parameters: {{"campaign_id": "..."}}
-- "launch_campaign": create a brand-new campaign and optionally apply a product discount. parameters: {{"name": "...", "channel": "paid_search|social_ads|email|organic|display|affiliate", "budget": N, "product_names": ["Laptop Pro 15"], "discount_pct": N, "duration_hours": N}}
-- "create_ticket": create a support ticket. parameters: {{"issue_description": "...", "priority": "low|medium|high|critical"}}
+Available action tools — you may ONLY propose actions using the exact action_type strings listed here.
+Do NOT invent action types. If the situation does not call for any of these tools, return proposed_actions as [].
 
-CRITICAL: When proposing a "pause_campaign" action, you MUST copy the campaign "name" field character-for-character from the raw tool data in the findings above. Never paraphrase or shorten it.
+- "restock"
+  When to use: a product is low or out of stock and needs replenishment.
+  parameters: {{"product_name": "the exact product name from the findings", "quantity": N}}
+
+- "apply_discount"
+  When to use: a product has slow sales or excess inventory that can be cleared with a discount.
+  parameters: {{"product_ids": ["uuid-or-sku", ...], "discount_pct": N, "duration_hours": N}}
+
+- "pause_campaign"
+  When to use: an active campaign is underperforming, overspending, or causing harm and should be stopped immediately.
+  parameters: {{"campaign_name": "COPY the 'name' field VERBATIM from the raw tool data — do NOT paraphrase, abbreviate, or guess.", "reason": "..."}}
+
+- "relaunch_campaign"
+  When to use: a paused campaign should be reactivated because conditions have improved.
+  parameters: {{"campaign_name": "COPY the 'name' field VERBATIM from the raw tool data — do NOT paraphrase, abbreviate, or guess."}}
+
+- "launch_campaign"
+  When to use: a brand-new campaign needs to be created to drive sales or awareness.
+  parameters: {{"name": "...", "channel": "paid_search|social_ads|email|organic|display|affiliate", "budget": N, "product_names": ["exact product name"], "discount_pct": N, "duration_hours": N}}
+
+- "create_ticket"
+  When to use: a customer-facing issue (complaint, billing problem, damaged item, etc.) requires human support follow-up.
+  parameters: {{"issue_description": "...", "priority": "low|medium|high|critical"}}
+
+CRITICAL rules:
+- Only include an action in proposed_actions if a specific finding in the data directly justifies it.
+- If none of the above tools apply to the findings, return proposed_actions as []. Do not force suggestions.
+- When proposing "pause_campaign" or "relaunch_campaign", you MUST copy the campaign "name" field character-for-character from the raw tool data. Never paraphrase or shorten it.
+- proposed_actions must contain at most 3 items.
 """
 
 

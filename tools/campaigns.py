@@ -232,6 +232,38 @@ async def get_paused_campaigns(date: str | None = None) -> dict:
 
 
 @safe_tool(agents=["marketing"])
+async def get_campaign_status_breakdown() -> dict:
+    """
+    Returns a breakdown of campaigns grouped by status (active, paused, completed, cancelled),
+    including count, total budget, and total spend for each status group.
+    Returns dict with keys: breakdown (list of {status, count, total_budget, total_spend})
+    """
+    sql = """
+        SELECT
+            status,
+            COUNT(*) AS count,
+            SUM(budget) AS total_budget,
+            SUM(spend_to_date) AS total_spend
+        FROM store.campaigns
+        GROUP BY status
+        ORDER BY status
+    """
+    async with db_connection() as conn:
+        rows = await conn.fetch(sql)
+    return {
+        "breakdown": [
+            {
+                "status": r["status"],
+                "count": int(r["count"]),
+                "total_budget": float(r["total_budget"]),
+                "total_spend": float(r["total_spend"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+@safe_tool(agents=["marketing"])
 async def get_promotion_schedule() -> dict:
     """
     Returns all active or upcoming promotions.
