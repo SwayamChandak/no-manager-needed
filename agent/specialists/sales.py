@@ -36,6 +36,8 @@ Tool notes:
 - get_revenue_by_product: Returns revenue and units sold per product (top N). Pass a date for that day's rankings; omit date for the last-30-day leaderboard.
 - get_revenue_by_region: Returns revenue and order counts by customer region. Pass a date for that day; omit date for last-30-day aggregates across all regions.
 - detect_anomaly: Flags whether today's revenue and order volume are statistically anomalous compared to the 7-day rolling average. Always requires a date.
+- get_customer_acquisition_metrics: Returns active customer count, new customer count, and repeat purchase rate. Pass a date for that day; omit date for last-30-day view.
+- get_top_selling_categories: Returns revenue and units sold grouped by product category (top N). Pass a date for that day's rankings; omit date for last-30-day leaderboard.
 
 When no specific date is mentioned in the query, prefer calling these tools WITHOUT a date argument to get the broader 30-day view.
 """

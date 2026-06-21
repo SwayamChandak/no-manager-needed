@@ -16,6 +16,9 @@ export function useChatStream() {
     setHitlPending,
     setApprovalStatus,
     setIsLoading,
+    appendStreamToken,
+    clearStream,
+    setStreaming,
   } = useChatStore();
 
   const sendMessage = useCallback(async (message) => {
@@ -26,6 +29,8 @@ export function useChatStream() {
     appendUserMessage(message);
     appendAssistantMessage("...thinking...");
     setIsLoading(true);
+    clearStream();
+    setStreaming(true);
 
     try {
       const response = await postChatStream(message, sessionId);
@@ -46,8 +51,9 @@ export function useChatStream() {
         } else if (etype === "node_end") {
           const node = ev.node ?? "";
           const label = NODE_LABELS[node] ?? node;
-          const ms = ev.duration_ms ?? "";
-          replaceLastLog(`✓ ${label} (${ms}ms)`);
+          replaceLastLog(`✓ ${label}`);
+        } else if (etype === "token") {
+          appendStreamToken(ev.node ?? "unknown", ev.content ?? "");
         } else if (etype === "off_topic") {
           const rejectionMsg = ev.message ?? "I can only help with e-commerce operations topics.";
           const offTopicReply =
@@ -75,7 +81,13 @@ export function useChatStream() {
           replaceLastAssistantMessage(finalAnswer);
         } else if (etype === "result") {
           const finalAnswer = ev.finding ?? ev.result ?? "";
-          replaceLastAssistantMessage(finalAnswer);
+          const meta = {
+            rootCauses: ev.root_causes ?? [],
+            recommendedActions: ev.recommended_actions ?? [],
+            activeSpecialists: ev.active_specialists ?? [],
+            confidence: ev.confidence ?? 0,
+          };
+          replaceLastAssistantMessage(finalAnswer, meta);
           setApprovalStatus("No pending approvals.");
         } else if (etype === "error") {
           replaceLastAssistantMessage(`Error: ${ev.message}`);
@@ -85,6 +97,7 @@ export function useChatStream() {
       replaceLastAssistantMessage(`Error: ${e.message}`);
     } finally {
       setIsLoading(false);
+      setStreaming(false);
     }
   }, [
     appendUserMessage,
@@ -97,6 +110,9 @@ export function useChatStream() {
     setHitlPending,
     setApprovalStatus,
     setIsLoading,
+    appendStreamToken,
+    clearStream,
+    setStreaming,
   ]);
 
   return { sendMessage };

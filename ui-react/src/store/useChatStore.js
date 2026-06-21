@@ -9,22 +9,30 @@ const useChatStore = create((set) => ({
   approvalStatus: "No pending approvals.",
   isLoading: false,
 
+  // Streaming tokens for the Stream tab
+  streamTokens: [],        // [{ node, content }]
+  isStreaming: false,
+
   appendUserMessage: (content) =>
     set((state) => ({
       history: [...state.history, { role: "user", content }],
     })),
 
-  appendAssistantMessage: (content) =>
+  appendAssistantMessage: (content, meta = null) =>
     set((state) => ({
-      history: [...state.history, { role: "assistant", content }],
+      history: [...state.history, { role: "assistant", content, meta }],
     })),
 
-  replaceLastAssistantMessage: (content) =>
+  replaceLastAssistantMessage: (content, meta) =>
     set((state) => {
       const history = [...state.history];
       for (let i = history.length - 1; i >= 0; i--) {
         if (history[i].role === "assistant") {
-          history[i] = { ...history[i], content };
+          history[i] = {
+            ...history[i],
+            content,
+            ...(meta !== undefined ? { meta } : {}),
+          };
           break;
         }
       }
@@ -60,6 +68,16 @@ const useChatStore = create((set) => ({
   setHitlPending: (bool) => set({ hitlPending: bool }),
   setApprovalStatus: (text) => set({ approvalStatus: text }),
   setIsLoading: (bool) => set({ isLoading: bool }),
+
+  // Stream token actions
+  appendStreamToken: (node, content) =>
+    set((state) => ({
+      streamTokens: [...state.streamTokens, { node, content }],
+    })),
+
+  clearStream: () => set({ streamTokens: [] }),
+
+  setStreaming: (bool) => set({ isStreaming: bool }),
 
   resetHitl: () =>
     set({

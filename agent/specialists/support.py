@@ -33,6 +33,8 @@ Tool notes:
 - get_review_sentiment: Returns the average star rating and positive/neutral/negative sentiment counts for reviews on a given date.
 - get_common_issues: Returns the top N most frequently reported customer issues with frequency counts and a representative verbatim quote for each.
 - get_refund_rate: Returns refund count, refund rate %, total refund value, and comparison to the prior week.
+- get_resolution_metrics: Returns complaint resolution efficiency: total resolved, average resolution hours, resolution rate %, and open count. Pass a date for that day; omit date for all-time view.
+- get_support_ticket_summary: Returns a snapshot of all support tickets grouped by status and priority. Includes total ticket count and number of critical open tickets. No date parameter.
 """
 
 

@@ -34,6 +34,8 @@ Tool notes:
 - get_paused_campaigns: Returns paused campaigns with the timestamp and reason. Pass a date to filter to campaigns paused on that specific day; omit date to return all campaigns currently in 'paused' status.
 - get_promotion_schedule: Returns all currently active or upcoming promotions with their discount %, affected product IDs, and start/end times. No date parameter.
 - get_campaign_status_breakdown: Returns a count, total budget, and total spend grouped by campaign status (active, paused, completed, cancelled). Use this to understand the overall health and distribution of campaigns. No parameters.
+- get_campaign_roi_comparison: Compares ROAS across all campaigns sorted by efficiency. Pass a date for that day; omit date for all-time view. Includes an efficiency_rating (high/medium/low) per campaign.
+- get_channel_trends: Returns total spend, revenue, ROAS, and day-over-day spend change for each channel over the last N days (default 30). Use this to spot which channels are growing or declining.
 
 When no specific date is mentioned in the query, call tools WITHOUT a date argument to get the broadest available view.
 """

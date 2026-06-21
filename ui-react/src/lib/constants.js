@@ -50,10 +50,10 @@ export const STARTER_PROMPTS = [
     specialists: ["inventory", "marketing"],
   },
   {
-    label: "Refunds & order volume",
+    label: "Pause underperforming campaigns",
     prompt:
-      "Have elevated refund rates or customer complaints been correlated with a recent drop in order volume?",
-    specialists: ["support", "sales"],
+      "Pause all active marketing campaigns that have a ROAS below 1.0 and get my approval before confirming any changes.",
+    specialists: ["marketing", "sales"],
   },
 ];
 

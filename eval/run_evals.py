@@ -6,13 +6,14 @@ Run with:
 
 This script:
 1. Boots the DB connection (same as the main app).
-2. Runs a fixed dataset of diagnostic queries through the full graph.
+2. Runs a fixed dataset of 6 date-independent goldens through the full LangGraph.
 3. Uses evals_iterator() so DeepEval snapshots every trace + span score
    to a local test_run_*.json file.
 4. After completion, run `deepeval inspect` to open the TUI.
 
-Only diagnostic (read-only) queries are used here so the graph never
-hits the HITL interrupt — the eval loop completes end-to-end automatically.
+Goldens are deliberately phrased without date qualifiers ("recently", "last 30 days",
+"today") so they return the same results regardless of when the seed DB was created.
+All are read-only (diagnose intent) so the graph never hits HITL.
 """
 
 import asyncio
@@ -38,18 +39,45 @@ from agent.graph import graph  # noqa: E402  (graph is a compiled StateGraph)
 
 
 # ---------------------------------------------------------------------------
-# Goldens — representative diagnostic queries (no "fix" intent so HITL
-# is never triggered and evals complete without human input).
+# Goldens — all date-independent (no "recently", "today", "last N days").
 # ---------------------------------------------------------------------------
 GOLDENS = [
-    Golden(input="What are the top selling products today?"),
-    Golden(input="Which products are running low on stock?"),
-    Golden(input="Are there any active marketing campaigns right now?"),
-    Golden(input="How many customer complaints were raised today?"),
-    Golden(input="Summarize today's overall business health"),
-    # Golden(input="Which product has the highest revenue this week?"),
-    # Golden(input="Are there any sales anomalies detected today?"),
-    # Golden(input="What is the current inventory status for all products?"),
+    Golden(
+        input="What are the top-selling products by overall revenue?",
+        expected_output="A ranked list of top-selling products with revenue figures.",
+        context=["Sales database: orders, products, order_items tables"],
+    ),
+    Golden(
+        input="Which products have stock levels below their reorder threshold?",
+        expected_output="A list of products below reorder threshold with current stock quantities and suggested restock amounts.",
+        context=["Inventory database: stock_levels, products, reorder_points tables"],
+    ),
+    Golden(
+        input="Which marketing campaigns are currently active and what are their performance metrics?",
+        expected_output="Performance metrics for each active campaign including spend, impressions, clicks, conversions, and ROAS.",
+        context=["Marketing database: campaigns, campaign_metrics tables"],
+    ),
+    Golden(
+        input="What is the total customer complaint volume broken down by category?",
+        expected_output="Total complaint count with a breakdown by category.",
+        context=["Support database: complaints table"],
+    ),
+    Golden(
+        input="Which high-revenue products have critically low inventory levels?",
+        expected_output="A cross-referenced list of products that are both top revenue generators and have low or out-of-stock inventory.",
+        context=[
+            "Sales database: orders, products, order_items tables",
+            "Inventory database: stock_levels, products tables",
+        ],
+    ),
+    Golden(
+        input="Are any products that are out of stock or low on stock being promoted by active marketing campaigns?",
+        expected_output="A cross-reference analysis identifying low-stock or out-of-stock products that have active campaigns running on them.",
+        context=[
+            "Inventory database: stock_levels, products tables",
+            "Marketing database: campaigns, campaign_products tables",
+        ],
+    ),
 ]
 
 
@@ -122,6 +150,7 @@ async def main() -> None:
         except Exception as exc:
             print(f"         ✗ FAILED: {exc}")
             failed += 1
+        await asyncio.sleep(5)
 
     elapsed = asyncio.get_event_loop().time() - start
     print(

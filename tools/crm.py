@@ -182,24 +182,6 @@ async def get_common_issues(date: str, top_n: int = 5) -> dict:
         ],
     }
 
-    """
-    Returns customer complaint volume and breakdown by category for a given date.
-    Args:
-        date: ISO date string
-    Returns dict with keys: date, total_complaints, pct_change_vs_prior_day, categories (list)
-    """
-    return {
-        "date": date,
-        "total_complaints": 47,
-        "pct_change_vs_prior_day": 156.0,
-        "categories": [
-            {"category": "item_out_of_stock", "count": 28, "pct": 59.6},
-            {"category": "order_cancelled", "count": 11, "pct": 23.4},
-            {"category": "slow_shipping", "count": 5, "pct": 10.6},
-            {"category": "wrong_item", "count": 3, "pct": 6.4},
-        ],
-    }
-
 
 @safe_tool(agents=["support"])
 def get_refund_rate(date: str) -> dict:
@@ -216,4 +198,108 @@ def get_refund_rate(date: str) -> dict:
         "total_refund_value": 2340.0,
         "vs_prior_week_pct": 88.0,
         "top_reason": "item_unavailable_after_order",
+    }
+
+
+@safe_tool(agents=["support"])
+async def get_resolution_metrics(date: str | None = None) -> dict:
+    """
+    Returns complaint and support ticket resolution efficiency metrics.
+    Args:
+        date: ISO date string (optional — omit for all-time aggregated view)
+    Returns dict with keys: date or date_range, total_resolved (int), avg_resolution_hours (float),
+        resolution_rate_pct (float), open_count (int)
+    """
+    if date is None:
+        sql = """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status IN ('resolved', 'closed')) AS resolved,
+                AVG(
+                    EXTRACT(EPOCH FROM (COALESCE(resolved_at, NOW()) - created_at)) / 3600
+                ) AS avg_hours,
+                COUNT(*) FILTER (WHERE status = 'open') AS open_count
+            FROM store.complaints
+        """
+        async with db_connection() as conn:
+            row = await conn.fetchrow(sql)
+        return {
+            "date_range": "all_time",
+            "total_resolved": int(row["resolved"]),
+            "avg_resolution_hours": round(float(row["avg_hours"] or 0), 1),
+            "resolution_rate_pct": round(
+                int(row["resolved"]) / max(int(row["total"]), 1) * 100, 1
+            ),
+            "open_count": int(row["open_count"]),
+        }
+
+    _date_val = _date.fromisoformat(date)
+    sql = """
+        SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE status IN ('resolved', 'closed')) AS resolved,
+            AVG(
+                EXTRACT(EPOCH FROM (COALESCE(resolved_at, NOW()) - created_at)) / 3600
+            ) AS avg_hours,
+            COUNT(*) FILTER (WHERE status = 'open') AS open_count
+        FROM store.complaints
+        WHERE DATE(created_at AT TIME ZONE 'UTC') = $1::date
+    """
+    async with db_connection() as conn:
+        row = await conn.fetchrow(sql, _date_val)
+    return {
+        "date": date,
+        "total_resolved": int(row["resolved"]),
+        "avg_resolution_hours": round(float(row["avg_hours"] or 0), 1),
+        "resolution_rate_pct": round(
+            int(row["resolved"]) / max(int(row["total"]), 1) * 100, 1
+        ),
+        "open_count": int(row["open_count"]),
+    }
+
+
+@safe_tool(agents=["support"])
+async def get_support_ticket_summary() -> dict:
+    """
+    Returns a summary of all support tickets grouped by status and priority.
+    Returns dict with keys: by_status (list of {status, count}), by_priority (list of {priority, count}),
+        total_tickets (int), critical_open (int)
+    """
+    status_sql = """
+        SELECT status, COUNT(*) AS count
+        FROM store.support_tickets
+        GROUP BY status
+        ORDER BY status
+    """
+    priority_sql = """
+        SELECT priority, COUNT(*) AS count
+        FROM store.support_tickets
+        GROUP BY priority
+        ORDER BY CASE priority
+            WHEN 'critical' THEN 1 WHEN 'high' THEN 2
+            WHEN 'medium' THEN 3 WHEN 'low' THEN 4
+            ELSE 5
+        END
+    """
+    critical_open_sql = """
+        SELECT COUNT(*) AS count
+        FROM store.support_tickets
+        WHERE priority = 'critical' AND status = 'open'
+    """
+    async with db_connection() as conn:
+        status_rows = await conn.fetch(status_sql)
+        priority_rows = await conn.fetch(priority_sql)
+        critical_open = await conn.fetchval(critical_open_sql) or 0
+    total = sum(int(r["count"]) for r in status_rows)
+    return {
+        "total_tickets": total,
+        "by_status": [
+            {"status": r["status"], "count": int(r["count"])}
+            for r in status_rows
+        ],
+        "by_priority": [
+            {"priority": r["priority"], "count": int(r["count"])}
+            for r in priority_rows
+        ],
+        "critical_open": int(critical_open),
     }

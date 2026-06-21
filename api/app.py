@@ -70,12 +70,14 @@ If IN-SCOPE, reply with exactly one word from: diagnose, fix, recall, summarize
 
 INTENT DEFINITIONS (read carefully — pick the FIRST that applies in this order):
 
-1. fix — The user explicitly asks you to TAKE a corrective action NOW.
-   Trigger words: restock, launch, apply, create, set, enable, refund, cancel, send.
-   Examples:
-   - "Restock the blue widgets."
-   - "Launch a discount campaign for shoes."
-   - "Create a support ticket for this customer."
+ 1. fix — The user explicitly asks you to TAKE a corrective action NOW.
+    Trigger words: restock, launch, apply, create, set, enable, refund, cancel, send, pause, stop, disable, update, adjust, modify, change, flag.
+    Examples:
+    - "Restock the blue widgets."
+    - "Launch a discount campaign for shoes."
+    - "Create a support ticket for this customer."
+    - "Pause all underperforming marketing campaigns."
+    - "Flag low-stock products as discontinued."
 
 2. summarize — The user wants a high-level overview of overall business health.
    Trigger phrases: "how's the business", "give me an overview", "overall status", "summary of everything".
@@ -158,12 +160,11 @@ async def chat_stream(request: ChatRequest):
 
     Event types emitted:
       - intent_classified: {type, intent}
-      - node_start: {type, node, input_preview}
-      - node_end: {type, node, duration_ms}
+      - node_start: {type, node}
+      - node_end: {type, node}
+      - token: {type, node, content}  ← live LLM token chunks
       - tool_start: {type, node, tool, input_preview}
-      - tool_end: {type, node, tool, output_preview, duration_ms}
-      - llm_start: {type, node}
-      - llm_end: {type, node, tokens}
+      - tool_end: {type, node, tool}
       - interrupt: {type, proposed_actions}
       - result: {type, ...full result dict...}
       - error: {type, message}
@@ -181,95 +182,99 @@ async def chat_stream(request: ChatRequest):
 
         yield f"data: {_json.dumps({'type': 'intent_classified', 'intent': intent})}\n\n"
 
-        from mcp_server.mcp_tools import (
-            diagnose as _mcp_diagnose,
-            fix as _mcp_fix,
-            recall as _mcp_recall,
-            summarize as _mcp_summarize,
-        )
+        from mcp_server.mcp_tools import stream_graph_execution
 
         try:
-            t0 = asyncio.get_event_loop().time()
+            async for etype, edata in stream_graph_execution(request.message, session_id, intent):
+                if etype == "node_start":
+                    yield f"data: {_json.dumps({'type': 'node_start', 'node': edata})}\n\n"
+                elif etype == "node_end":
+                    yield f"data: {_json.dumps({'type': 'node_end', 'node': edata})}\n\n"
+                elif etype == "token":
+                    yield f"data: {_json.dumps({'type': 'token', 'node': edata['node'], 'content': edata['content']})}\n\n"
+                elif etype == "tool_start":
+                    yield f"data: {_json.dumps({'type': 'tool_start', 'node': edata.get('node', ''), 'tool': edata.get('tool', ''), 'input_preview': edata.get('input_preview', '')})}\n\n"
+                elif etype == "tool_end":
+                    yield f"data: {_json.dumps({'type': 'tool_end', 'node': edata.get('node', ''), 'tool': edata.get('tool', '')})}\n\n"
+                elif etype == "interrupt":
+                    yield f"data: {_json.dumps({'type': 'interrupt', 'proposed_actions': edata.get('proposed_actions', []), 'status': 'awaiting_approval', 'session_id': edata.get('session_id', session_id)})}\n\n"
+                elif etype == "result":
+                    final_state = edata
+                    fr = final_state.get("final_response")
+                    root_causes = final_state.get("root_causes", [])
+                    proposed_actions = final_state.get("proposed_actions", [])
+                    active_specialists = final_state.get("active_specialists", [])
 
-            if intent == "recall":
-                yield f"data: {_json.dumps({'type': 'node_start', 'node': 'recall_node', 'input_preview': {'query': request.message[:120], 'intent': 'recall'}})}\n\n"
-                result = await _mcp_recall(scenario_description=request.message)
-                duration_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
-                yield f"data: {_json.dumps({'type': 'node_end', 'node': 'recall_node', 'duration_ms': duration_ms})}\n\n"
-                result_payload = {
-                    "type": "result",
-                    "session_id": result.get("session_id", session_id),
-                    "finding": result.get("summary", "No incidents found."),
-                    "incidents": result.get("incidents", []),
-                    "root_causes": [],
-                    "confidence": 0.0,
-                    "supporting_data": {},
-                    "recommended_actions": [],
-                    "proposed_actions": [],
-                    "status": "completed",
-                }
-                yield f"data: {_json.dumps(result_payload, default=str)}\n\n"
-
-            elif intent == "diagnose":
-                result = await _mcp_diagnose(question=request.message, session_id=session_id)
-                duration_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
-                result_payload = {
-                    "type": "result",
-                    "session_id": result.get("session_id", session_id),
-                    "finding": result.get("finding", "No finding generated."),
-                    "root_causes": result.get("root_causes", []),
-                    "confidence": result.get("confidence", 0.0),
-                    "supporting_data": result.get("supporting_data", {}),
-                    "recommended_actions": result.get("recommended_actions", []),
-                    "proposed_actions": result.get("recommended_actions", []),
-                    "status": "completed",
-                    "duration_ms": duration_ms,
-                }
-                yield f"data: {_json.dumps(result_payload, default=str)}\n\n"
-
-            elif intent == "fix":
-                result = await _mcp_fix(query=request.message, session_id=session_id)
-                duration_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
-                status = result.get("status", "unknown")
-                if status == "awaiting_approval":
-                    proposed = result.get("proposed_actions", [])
-                    actions_payload = [
-                        a.model_dump() if hasattr(a, "model_dump") else a
-                        for a in proposed
-                    ]
-                    yield f"data: {_json.dumps({'type': 'interrupt', 'proposed_actions': actions_payload, 'status': 'awaiting_approval', 'session_id': session_id, 'duration_ms': duration_ms})}\n\n"
-                else:
-                    result_payload = {
-                        "type": "result",
-                        "session_id": result.get("session_id", session_id),
-                        "finding": result.get("summary", ""),
-                        "root_causes": [],
-                        "confidence": 0.0,
-                        "supporting_data": {},
-                        "recommended_actions": result.get("proposed_actions", []),
-                        "proposed_actions": result.get("proposed_actions", []),
-                        "actions_taken": result.get("actions_taken", []),
-                        "status": status,
-                        "duration_ms": duration_ms,
-                    }
+                    if intent == "recall":
+                        result_payload = {
+                            "type": "result",
+                            "session_id": final_state.get("session_id", session_id),
+                            "finding": fr.explanation if fr else "No incidents found.",
+                            "incidents": [m.model_dump() if hasattr(m, "model_dump") else m for m in final_state.get("retrieved_memories", [])],
+                            "root_causes": [],
+                            "confidence": 0.0,
+                            "recommended_actions": [],
+                            "proposed_actions": [],
+                            "active_specialists": [],
+                            "status": "completed",
+                        }
+                    elif intent == "diagnose":
+                        confidence = (
+                            sum(rc.confidence for rc in root_causes) / len(root_causes)
+                            if root_causes else 0.0
+                        )
+                        result_payload = {
+                            "type": "result",
+                            "session_id": final_state.get("session_id", session_id),
+                            "finding": fr.explanation if fr else "No finding generated.",
+                            "root_causes": [rc.model_dump() if hasattr(rc, "model_dump") else rc for rc in root_causes],
+                            "confidence": round(confidence, 2),
+                            "supporting_data": final_state.get("correlation_matrix", {}),
+                            "recommended_actions": proposed_actions,
+                            "proposed_actions": proposed_actions,
+                            "active_specialists": active_specialists,
+                            "status": "completed",
+                        }
+                    elif intent == "fix":
+                        executed_actions = final_state.get("executed_actions", [])
+                        result_payload = {
+                            "type": "result",
+                            "session_id": final_state.get("session_id", session_id),
+                            "finding": fr.explanation if fr else "",
+                            "root_causes": [rc.model_dump() if hasattr(rc, "model_dump") else rc for rc in root_causes],
+                            "confidence": 0.0,
+                            "recommended_actions": proposed_actions,
+                            "proposed_actions": proposed_actions,
+                            "actions_taken": [ea.model_dump() if hasattr(ea, "model_dump") else ea for ea in executed_actions],
+                            "active_specialists": active_specialists,
+                            "status": "completed",
+                        }
+                    elif intent == "summarize":
+                        result_payload = {
+                            "type": "result",
+                            "session_id": final_state.get("session_id", session_id),
+                            "finding": fr.explanation if fr else "No summary generated.",
+                            "root_causes": [],
+                            "confidence": 0.0,
+                            "supporting_data": {"top_issues": [rc.description for rc in root_causes[:5]]},
+                            "recommended_actions": proposed_actions,
+                            "proposed_actions": proposed_actions,
+                            "active_specialists": active_specialists,
+                            "status": "completed",
+                        }
+                    else:
+                        result_payload = {
+                            "type": "result",
+                            "session_id": final_state.get("session_id", session_id),
+                            "finding": fr.explanation if fr else "Done.",
+                            "root_causes": [],
+                            "confidence": 0.0,
+                            "active_specialists": active_specialists,
+                            "status": "completed",
+                        }
                     yield f"data: {_json.dumps(result_payload, default=str)}\n\n"
-
-            elif intent == "summarize":
-                result = await _mcp_summarize(date_range=request.message)
-                duration_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
-                result_payload = {
-                    "type": "result",
-                    "session_id": result.get("session_id", session_id),
-                    "finding": result.get("executive_summary", "No summary generated."),
-                    "root_causes": [],
-                    "confidence": result.get("health_score", 0.0),
-                    "supporting_data": {"top_issues": result.get("top_issues", [])},
-                    "recommended_actions": result.get("recommended_actions", []),
-                    "proposed_actions": result.get("recommended_actions", []),
-                    "status": "completed",
-                    "duration_ms": duration_ms,
-                }
-                yield f"data: {_json.dumps(result_payload, default=str)}\n\n"
+                elif etype == "error":
+                    yield f"data: {_json.dumps({'type': 'error', 'message': edata.get('message', 'Unknown error')})}\n\n"
 
         except Exception as exc:
             import traceback

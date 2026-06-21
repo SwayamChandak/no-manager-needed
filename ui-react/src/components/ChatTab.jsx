@@ -4,6 +4,7 @@ import ChatHistory from "./ChatHistory";
 import MessageInput from "./MessageInput";
 import ActivityLog from "./ActivityLog";
 import StarterPrompts from "./StarterPrompts";
+import StreamSidebar from "./StreamSidebar";
 
 function ChatTab() {
   const isLoading = useChatStore((s) => s.isLoading);
@@ -12,17 +13,20 @@ function ChatTab() {
   const { sendMessage } = useChatStream();
 
   return (
-    <div className="flex flex-col gap-4">
-      <ChatHistory />
-      {history.length === 0 && (
-        <StarterPrompts onSelect={sendMessage} disabled={isLoading} />
-      )}
-      <MessageInput
-        onSend={sendMessage}
-        onClear={clearHistory}
-        isLoading={isLoading}
-      />
-      <ActivityLog />
+    <div className="flex gap-4">
+      <div className="flex flex-col gap-4 flex-1 min-w-0">
+        <ChatHistory />
+        {history.length === 0 && (
+          <StarterPrompts onSelect={sendMessage} disabled={isLoading} />
+        )}
+        <MessageInput
+          onSend={sendMessage}
+          onClear={clearHistory}
+          isLoading={isLoading}
+        />
+        <ActivityLog />
+      </div>
+      <StreamSidebar />
     </div>
   );
 }

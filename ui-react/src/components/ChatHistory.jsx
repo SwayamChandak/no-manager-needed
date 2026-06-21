@@ -17,7 +17,7 @@ function ChatHistory() {
         <p className="text-muted-foreground text-sm">Start a conversation above.</p>
       )}
       {history.map((msg, i) => (
-        <ChatMessage key={i} role={msg.role} content={msg.content} />
+        <ChatMessage key={i} role={msg.role} content={msg.content} meta={msg.meta} />
       ))}
       <div ref={bottomRef} />
     </ScrollArea>

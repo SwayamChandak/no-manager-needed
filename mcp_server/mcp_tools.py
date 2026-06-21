@@ -29,6 +29,90 @@ from mcp_server.schemas import (
 from api.hitl_store import hitl_store
 
 
+# ---------------------------------------------------------------------------
+# Streaming graph execution — emits tokens + events in real-time
+# ---------------------------------------------------------------------------
+
+async def stream_graph_execution(query: str, session_id: str, intent_hint: str = "diagnose"):
+    """
+    Async generator that yields (event_type, data) tuples during graph execution.
+
+    Event types:
+        ("node_start", node_name: str)
+        ("node_end", node_name: str)
+        ("token", {"node": str, "content": str})
+        ("tool_start", {"node": str, "tool": str, "input_preview": str})
+        ("tool_end", {"node": str, "tool": str})
+        ("interrupt", {"proposed_actions": [...], "session_id": str})
+        ("result", final_state: dict)
+        ("error", {"message": str})
+    """
+    initial_state = _build_initial_state(query, session_id, intent_hint)
+    config = _graph_config(session_id)
+
+    active_node: str | None = None
+    saw_interrupt = False
+
+    try:
+        async for event in graph.astream_events(initial_state, config, version="v2"):
+            kind = event["event"]
+            metadata = event.get("metadata") or {}
+            node = metadata.get("langgraph_node", "") or ""
+
+            if kind == "on_chain_start":
+                if node and node != active_node:
+                    if active_node:
+                        yield ("node_end", active_node)
+                    active_node = node
+                    yield ("node_start", node)
+
+            elif kind == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                content = ""
+                if hasattr(chunk, "content"):
+                    content = chunk.content or ""
+                elif isinstance(chunk, str):
+                    content = chunk
+                if content:
+                    yield ("token", {"node": active_node or node or "unknown", "content": content})
+
+            elif kind == "on_tool_start":
+                tool_name = event.get("name", "")
+                tool_input = event.get("data", {}).get("input", "")
+                yield ("tool_start", {"node": active_node or node, "tool": tool_name, "input_preview": str(tool_input)[:200]})
+
+            elif kind == "on_tool_end":
+                tool_name = event.get("name", "")
+                yield ("tool_end", {"node": active_node or node, "tool": tool_name})
+
+    except Exception as exc:
+        snapshot = graph.get_state(config)
+        if snapshot and snapshot.next:
+            saw_interrupt = True
+            proposed = snapshot.values.get("proposed_actions", [])
+            yield ("interrupt", {
+                "proposed_actions": [a.model_dump() if hasattr(a, "model_dump") else a for a in proposed],
+                "session_id": session_id,
+            })
+        else:
+            yield ("error", {"message": str(exc)})
+            return
+
+    if active_node:
+        yield ("node_end", active_node)
+
+    if not saw_interrupt:
+        snapshot = graph.get_state(config)
+        if snapshot and snapshot.next:
+            proposed = snapshot.values.get("proposed_actions", [])
+            yield ("interrupt", {
+                "proposed_actions": [a.model_dump() if hasattr(a, "model_dump") else a for a in proposed],
+                "session_id": session_id,
+            })
+        elif snapshot:
+            yield ("result", dict(snapshot.values))
+
+
 def _build_initial_state(query: str, session_id: str, intent_hint: str = "diagnose") -> OpsAgentState:
     """Build a minimal initial OpsAgentState for a fresh graph invocation."""
     return {
@@ -90,6 +174,7 @@ async def diagnose(question: str, session_id: str) -> dict:
             confidence=0.0,
             supporting_data={},
             recommended_actions=result.get("proposed_actions", []),
+            active_specialists=result.get("active_specialists", []),
         ).model_dump()
 
     final_response = result.get("final_response")
@@ -109,6 +194,7 @@ async def diagnose(question: str, session_id: str) -> dict:
         confidence=round(confidence, 2),
         supporting_data=supporting_data,
         recommended_actions=result.get("proposed_actions", []),
+        active_specialists=result.get("active_specialists", []),
     ).model_dump()
 
 
@@ -188,6 +274,7 @@ async def fix(
                     f"The system has identified {len(proposed)} action(s) requiring your approval. "
                     "Call fix() again with resume=True and approved=True/False to proceed."
                 ),
+                active_specialists=result.get("active_specialists", []),
             ).model_dump()
 
         # Graph ran to completion without interrupting
@@ -199,6 +286,7 @@ async def fix(
             proposed_actions=result.get("approved_actions", []),
             actions_taken=executed,
             summary=final_response.explanation if final_response else "Actions executed.",
+            active_specialists=result.get("active_specialists", []),
         ).model_dump()
 
     except Exception as exc:
@@ -220,6 +308,7 @@ async def fix(
                 f"The system has identified {len(proposed)} action(s) requiring your approval. "
                 "Call fix() again with resume=True and approved=True/False to proceed."
             ),
+            active_specialists=snapshot.values.get("active_specialists", []),
         ).model_dump()
 
 
@@ -267,6 +356,7 @@ async def recall(scenario_description: str, top_k: int = 3) -> dict:
         session_id=session_id,
         incidents=incidents,
         summary=summary,
+        active_specialists=[],
     ).model_dump()
 
 
@@ -316,4 +406,5 @@ async def summarize(date_range: str, focus_areas: Optional[List[str]] = None) ->
         top_issues=top_issues,
         recommended_actions=result.get("proposed_actions", []),
         date_range=date_range,
+        active_specialists=result.get("active_specialists", focus),
     ).model_dump()

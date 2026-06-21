@@ -128,3 +128,108 @@ async def get_restock_recommendations(threshold_multiplier: float = 1.0) -> dict
             for r in rows
         ]
     }
+
+
+@safe_tool(agents=["inventory"])
+async def get_inventory_turnover_rate(date: str | None = None) -> dict:
+    """
+    Returns inventory turnover (units sold / average stock) by product category.
+    Args:
+        date: ISO date string (optional — omit for last-30-day view)
+    Returns dict with keys: date or date_range, categories (list of {category, units_sold, avg_stock, turnover_rate})
+    """
+    if date is None:
+        sql = """
+            SELECT
+                p.category,
+                COALESCE(SUM(ie.quantity_delta * -1), 0) AS units_sold,
+                AVG(i.stock_qty) AS avg_stock
+            FROM store.inventory i
+            JOIN store.products p ON p.product_id = i.product_id
+            LEFT JOIN store.inventory_events ie ON ie.product_id = i.product_id
+                AND ie.event_type = 'sale'
+                AND ie.created_at >= NOW() - INTERVAL '30 days'
+            WHERE p.category IS NOT NULL
+            GROUP BY p.category
+            ORDER BY units_sold DESC
+        """
+        async with db_connection() as conn:
+            rows = await conn.fetch(sql)
+        return {
+            "date_range": "last_30_days",
+            "categories": [
+                {
+                    "category": r["category"],
+                    "units_sold": int(r["units_sold"]),
+                    "avg_stock": round(float(r["avg_stock"] or 0), 1),
+                    "turnover_rate": round(int(r["units_sold"]) / max(float(r["avg_stock"] or 0), 1), 2),
+                }
+                for r in rows
+            ],
+        }
+
+    _date_val = _date.fromisoformat(date)
+    sql = """
+        SELECT
+            p.category,
+            COALESCE(SUM(ie.quantity_delta * -1), 0) AS units_sold,
+            AVG(i.stock_qty) AS avg_stock
+        FROM store.inventory i
+        JOIN store.products p ON p.product_id = i.product_id
+        LEFT JOIN store.inventory_events ie ON ie.product_id = i.product_id
+            AND ie.event_type = 'sale'
+            AND DATE(ie.created_at AT TIME ZONE 'UTC') = $1::date
+        WHERE p.category IS NOT NULL
+        GROUP BY p.category
+        ORDER BY units_sold DESC
+    """
+    async with db_connection() as conn:
+        rows = await conn.fetch(sql, _date_val)
+    return {
+        "date": date,
+        "categories": [
+            {
+                "category": r["category"],
+                "units_sold": int(r["units_sold"]),
+                "avg_stock": round(float(r["avg_stock"] or 0), 1),
+                "turnover_rate": round(int(r["units_sold"]) / max(float(r["avg_stock"] or 0), 1), 2),
+            }
+            for r in rows
+        ],
+    }
+
+
+@safe_tool(agents=["inventory"])
+async def get_inventory_summary_by_category() -> dict:
+    """
+    Returns aggregate inventory statistics grouped by product category.
+    Returns dict with keys: categories (list of {category, product_count, total_stock, low_stock_count, out_of_stock_count})
+    """
+    sql = """
+        SELECT
+            p.category,
+            COUNT(*) AS product_count,
+            SUM(i.stock_qty) AS total_stock,
+            SUM(CASE WHEN i.status = 'low' THEN 1 ELSE 0 END) AS low_stock_count,
+            SUM(CASE WHEN i.status = 'out_of_stock' THEN 1 ELSE 0 END) AS out_of_stock_count
+        FROM store.inventory i
+        JOIN store.products p ON p.product_id = i.product_id
+        WHERE p.is_active = TRUE
+          AND p.category IS NOT NULL
+        GROUP BY p.category
+        ORDER BY total_stock DESC
+    """
+    async with db_connection() as conn:
+        rows = await conn.fetch(sql)
+    return {
+        "categories": [
+            {
+                "category": r["category"],
+                "product_count": int(r["product_count"]),
+                "total_stock": int(r["total_stock"]),
+                "low_stock_count": int(r["low_stock_count"]),
+                "out_of_stock_count": int(r["out_of_stock_count"]),
+            }
+            for r in rows
+        ]
+    }

@@ -188,6 +188,24 @@ def build_graph() -> CompiledStateGraph:
     else:
         checkpointer = MemorySaver()
 
+    # Register custom state types so msgpack checkpoint serialisation
+    # doesn't emit warnings (will be required in future LangGraph).
+    allowed = [
+        ("agent.state", "SpecialistFinding"),
+        ("agent.state", "RootCause"),
+        ("agent.state", "ProposedAction"),
+        ("agent.state", "ExecutedAction"),
+        ("agent.state", "PastIncident"),
+        ("agent.state", "StructuredResponse"),
+        ("agent.state", "SubQuestion"),
+        ("agent.state", "OrchestratorDecision"),
+        ("agent.state", "CorrelationMatrix"),
+        ("agent.state", "PairCorrelation"),
+        ("agent.state", "AggregatorOutput"),
+    ]
+    if hasattr(checkpointer, "allowed_msgpack_modules"):
+        checkpointer.allowed_msgpack_modules = allowed
+
     return builder.compile(checkpointer=checkpointer)
 
 

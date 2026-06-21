@@ -31,6 +31,9 @@ P005 = uuid.UUID("a1b2c3d4-0005-0005-0005-000000000005")
 
 CAMP_042 = uuid.UUID("b1c2d3e4-0042-0042-0042-000000000042")
 CAMP_039 = uuid.UUID("b1c2d3e4-0039-0039-0039-000000000039")
+CAMP_043 = uuid.UUID("b1c2d3e4-0043-0043-0043-000000000043")
+CAMP_044 = uuid.UUID("b1c2d3e4-0044-0044-0044-000000000044")
+CAMP_045 = uuid.UUID("b1c2d3e4-0045-0045-0045-000000000045")
 
 PRODUCTS = [
     (P001, "P001", "Laptop Pro 15",      "Electronics", 1299.99, 850.00),
@@ -195,10 +198,46 @@ async def seed(dsn: str) -> None:
             datetime.now(timezone.utc) - timedelta(days=2),
             "ROAS below 1.5 threshold",
         )
+        await conn.execute(
+            """
+            INSERT INTO store.campaigns
+                (campaign_id, external_id, name, channel, status, budget, spend_to_date, start_date)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (campaign_id) DO NOTHING
+            """,
+            CAMP_043, "CAMP_043", "Display Retargeting Q2", "display",
+            "active", 5000.00, 2400.00, today - timedelta(days=15),
+        )
+        await conn.execute(
+            """
+            INSERT INTO store.campaigns
+                (campaign_id, external_id, name, channel, status, budget, spend_to_date, start_date)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (campaign_id) DO NOTHING
+            """,
+            CAMP_044, "CAMP_044", "Email Newsletter Promo", "email",
+            "active", 3000.00, 1800.00, today - timedelta(days=10),
+        )
+        await conn.execute(
+            """
+            INSERT INTO store.campaigns
+                (campaign_id, external_id, name, channel, status, budget, spend_to_date, start_date)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (campaign_id) DO NOTHING
+            """,
+            CAMP_045, "CAMP_045", "Social Media Flash Sale", "social_ads",
+            "active", 6000.00, 3900.00, today - timedelta(days=12),
+        )
 
         # ── campaign_products ─────────────────────────────────────────────────
         print("[seed] Inserting campaign products …")
-        for camp, prod in [(CAMP_042, P001), (CAMP_042, P002)]:
+        camp_product_pairs = [
+            (CAMP_042, P001), (CAMP_042, P002),
+            (CAMP_043, P005), (CAMP_043, P001),
+            (CAMP_044, P002), (CAMP_044, P004),
+            (CAMP_045, P003), (CAMP_045, P005),
+        ]
+        for camp, prod in camp_product_pairs:
             await conn.execute(
                 """
                 INSERT INTO store.campaign_products (campaign_id, product_id)
@@ -242,6 +281,51 @@ async def seed(dsn: str) -> None:
                 rng.randint(5000, 9000), rng.randint(200, 500),
                 rng.randint(5, 15), revenue_039, roas_039,
             )
+            # CAMP_043 — display, healthy ROAS
+            roas_043 = round(rng.uniform(1.8, 3.0), 2)
+            spend_043 = round(rng.uniform(250, 450), 2)
+            revenue_043 = round(spend_043 * roas_043, 2)
+            await conn.execute(
+                """
+                INSERT INTO store.campaign_metrics
+                    (campaign_id, date, spend, impressions, clicks, conversions, revenue, roas)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (campaign_id, date) DO NOTHING
+                """,
+                CAMP_043, day, spend_043,
+                rng.randint(6000, 10000), rng.randint(300, 700),
+                rng.randint(10, 30), revenue_043, roas_043,
+            )
+            # CAMP_044 — email, moderate ROAS
+            roas_044 = round(rng.uniform(1.2, 1.9), 2)
+            spend_044 = round(rng.uniform(150, 350), 2)
+            revenue_044 = round(spend_044 * roas_044, 2)
+            await conn.execute(
+                """
+                INSERT INTO store.campaign_metrics
+                    (campaign_id, date, spend, impressions, clicks, conversions, revenue, roas)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (campaign_id, date) DO NOTHING
+                """,
+                CAMP_044, day, spend_044,
+                rng.randint(3000, 6000), rng.randint(100, 300),
+                rng.randint(5, 15), revenue_044, roas_044,
+            )
+            # CAMP_045 — social_ads, poor ROAS (below 1.0)
+            roas_045 = round(rng.uniform(0.6, 0.95), 2)
+            spend_045 = round(rng.uniform(400, 600), 2)
+            revenue_045 = round(spend_045 * roas_045, 2)
+            await conn.execute(
+                """
+                INSERT INTO store.campaign_metrics
+                    (campaign_id, date, spend, impressions, clicks, conversions, revenue, roas)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (campaign_id, date) DO NOTHING
+                """,
+                CAMP_045, day, spend_045,
+                rng.randint(4000, 8000), rng.randint(200, 400),
+                rng.randint(3, 10), revenue_045, roas_045,
+            )
 
         # ── complaints ────────────────────────────────────────────────────────
         print("[seed] Inserting complaints …")
@@ -256,6 +340,21 @@ async def seed(dsn: str) -> None:
                 VALUES ('complaint', 'item_out_of_stock', $1, 'open', $2)
                 """,
                 f"Item out of stock — order #{1000 + i}", created,
+            )
+        # 3 complaints today so "recent" queries find data
+        for i in range(3):
+            cat = rng.choice(["item_out_of_stock", "slow_shipping", "billing"])
+            desc = {
+                "item_out_of_stock": f"Order cancelled — item out of stock at fulfilment #{9000 + i}",
+                "slow_shipping": f"Shipping delayed beyond expected delivery date #{8000 + i}",
+                "billing": f"Double charge on credit card for order #{7000 + i}",
+            }[cat]
+            await conn.execute(
+                """
+                INSERT INTO store.complaints (type, category, description, status, created_at)
+                VALUES ('complaint', $1, $2, 'open', $3)
+                """,
+                cat, desc, _utc(today, rng.randint(8, 16)),
             )
         # 8 slow-shipping complaints
         for i in range(8):

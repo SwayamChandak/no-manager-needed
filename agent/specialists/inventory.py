@@ -32,6 +32,8 @@ Tool notes:
 - get_stock_levels: Returns current stock quantity, reorder threshold, and status for all active products (or a filtered subset by product ID).
 - get_stockout_events: Returns products that went out of stock on a given date, including whether an active campaign was running on each item.
 - get_restock_recommendations: Returns products at or below their reorder threshold, along with a suggested restock quantity.
+- get_inventory_turnover_rate: Returns units sold, average stock, and turnover rate grouped by product category. Pass a date for that day; omit date for last-30-day view. Higher turnover means faster-selling inventory.
+- get_inventory_summary_by_category: Returns aggregate inventory stats per category: product count, total stock, low stock count, and out-of-stock count. No date parameter — shows current snapshot.
 """
 
 

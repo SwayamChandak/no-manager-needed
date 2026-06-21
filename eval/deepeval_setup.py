@@ -65,7 +65,7 @@ def _judge() -> AzureOpenAIModel:
             # Cap completion tokens — metric scores + reasoning never need more
             # than ~1 000 tokens. Without this, the model can exhaust its output
             # limit mid-JSON and cause a LengthFinishReasonError.
-            generation_kwargs={"max_tokens": 1024},
+            generation_kwargs={"max_tokens": 4096},
         )
     return _judge_instance
 
@@ -255,7 +255,6 @@ def output_formatter_metrics() -> list:
                 "3. Is the intent correctly reflected: diagnose responses propose (not execute) "
                 "actions; fix responses confirm what was executed.\n"
                 "4. Is the response free of hallucinated details not found in the context?\n"
-                "5. Is it concise — no more than 5 sentences for a typical query?\n"
                 "Deduct for vagueness, wrong intent framing, or any fabricated specifics."
             ),
             evaluation_params=[SingleTurnParams.INPUT, SingleTurnParams.ACTUAL_OUTPUT],

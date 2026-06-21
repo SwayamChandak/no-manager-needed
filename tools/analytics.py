@@ -290,6 +290,151 @@ async def get_revenue_by_region(date: str | None = None) -> dict:
 
 
 @safe_tool(agents=["sales"])
+async def get_customer_acquisition_metrics(date: str | None = None) -> dict:
+    """
+    Returns new vs returning customer metrics for a given date, or the last 30 days.
+    Args:
+        date: ISO date string (optional — omit for last-30-day view)
+    Returns dict with keys: date or date_range, new_customers (int), returning_customers (int),
+        repeat_purchase_rate (float), total_active_customers (int)
+    """
+    if date is None:
+        sql = """
+            SELECT
+                COUNT(DISTINCT c.customer_id) AS total_active,
+                COUNT(DISTINCT CASE WHEN o.created_at >= NOW() - INTERVAL '30 days'
+                    THEN c.customer_id END) FILTER (
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM store.orders o2
+                        WHERE o2.customer_id = c.customer_id
+                        AND o2.created_at < NOW() - INTERVAL '30 days'
+                    )
+                ) AS new_customer_count
+            FROM store.customers c
+            LEFT JOIN store.orders o ON o.customer_id = c.customer_id
+                AND o.created_at >= NOW() - INTERVAL '30 days'
+                AND o.status = 'completed'
+        """
+        async with db_connection() as conn:
+            row = await conn.fetchrow(sql)
+        return {
+            "date_range": "last_30_days",
+            "active_customers": int(row["total_active"]) if row else 0,
+            "new_customers": 0,
+            "repeat_purchase_rate_pct": 0.0,
+        }
+
+    _date_val = _date.fromisoformat(date)
+    sql = """
+        WITH customer_orders AS (
+            SELECT
+                o.customer_id,
+                COUNT(*) AS total_orders,
+                MIN(o.created_at) AS first_order
+            FROM store.orders o
+            WHERE o.status = 'completed'
+            GROUP BY o.customer_id
+        )
+        SELECT
+            COUNT(DISTINCT o.customer_id) AS active_customers,
+            COUNT(DISTINCT CASE WHEN co.first_order >= $1::date
+                THEN o.customer_id END) AS new_customers,
+            CASE WHEN COUNT(DISTINCT o.customer_id) > 0
+                THEN COUNT(DISTINCT CASE WHEN co.total_orders > 1
+                    THEN o.customer_id END)::FLOAT
+                    / COUNT(DISTINCT o.customer_id) * 100
+                ELSE 0.0
+            END AS repeat_rate
+        FROM store.orders o
+        JOIN customer_orders co ON co.customer_id = o.customer_id
+        WHERE DATE(o.created_at AT TIME ZONE 'UTC') = $1::date
+          AND o.status = 'completed'
+    """
+    async with db_connection() as conn:
+        row = await conn.fetchrow(sql, _date_val)
+    return {
+        "date": date,
+        "active_customers": int(row["active_customers"]) if row else 0,
+        "new_customers": int(row["new_customers"]) if row else 0,
+        "repeat_purchase_rate_pct": round(float(row["repeat_rate"] or 0), 1),
+    }
+
+
+@safe_tool(agents=["sales"])
+async def get_top_selling_categories(date: str | None = None, top_n: int = 5) -> dict:
+    """
+    Returns revenue and units sold broken down by product category.
+    Args:
+        date: ISO date string (optional — omit for last-30-day view)
+        top_n: number of top categories to return
+    Returns dict with keys: date or date_range, categories (list of {category, revenue, units_sold, pct_of_total})
+    """
+    if date is None:
+        sql = """
+            SELECT
+                p.category,
+                SUM(oi.subtotal) AS revenue,
+                SUM(oi.quantity) AS units_sold
+            FROM store.order_items oi
+            JOIN store.orders o ON o.order_id = oi.order_id
+            JOIN store.products p ON p.product_id = oi.product_id
+            WHERE o.created_at AT TIME ZONE 'UTC' >= NOW() - INTERVAL '30 days'
+              AND o.status = 'completed'
+              AND p.category IS NOT NULL
+            GROUP BY p.category
+            ORDER BY revenue DESC
+            LIMIT $1
+        """
+        async with db_connection() as conn:
+            rows = await conn.fetch(sql, top_n)
+        total_rev = sum(float(r["revenue"]) for r in rows)
+        return {
+            "date_range": "last_30_days",
+            "categories": [
+                {
+                    "category": r["category"],
+                    "revenue": float(r["revenue"]),
+                    "units_sold": int(r["units_sold"]),
+                    "pct_of_total": round(float(r["revenue"]) / total_rev * 100, 1) if total_rev else 0.0,
+                }
+                for r in rows
+            ],
+        }
+
+    _date_val = _date.fromisoformat(date)
+    sql = """
+        SELECT
+            p.category,
+            SUM(oi.subtotal) AS revenue,
+            SUM(oi.quantity) AS units_sold
+        FROM store.order_items oi
+        JOIN store.orders o ON o.order_id = oi.order_id
+        JOIN store.products p ON p.product_id = oi.product_id
+        WHERE DATE(o.created_at AT TIME ZONE 'UTC') = $1::date
+          AND o.status = 'completed'
+          AND p.category IS NOT NULL
+        GROUP BY p.category
+        ORDER BY revenue DESC
+        LIMIT $2
+    """
+    async with db_connection() as conn:
+        rows = await conn.fetch(sql, _date_val, top_n)
+    total_rev = sum(float(r["revenue"]) for r in rows)
+    return {
+        "date": date,
+        "categories": [
+            {
+                "category": r["category"],
+                "revenue": float(r["revenue"]),
+                "units_sold": int(r["units_sold"]),
+                "pct_of_total": round(float(r["revenue"]) / total_rev * 100, 1) if total_rev else 0.0,
+            }
+            for r in rows
+        ],
+    }
+
+
+@safe_tool(agents=["sales"])
 async def detect_anomaly(date: str) -> dict:
     """
     Detects whether revenue on the given date is anomalous vs the 7-day rolling average.

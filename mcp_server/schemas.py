@@ -42,6 +42,7 @@ class DiagnoseResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     supporting_data: Dict[str, Any]
     recommended_actions: List[ProposedAction]
+    active_specialists: List[str] = Field(default_factory=list)
 
 
 class FixResult(BaseModel):
@@ -50,12 +51,14 @@ class FixResult(BaseModel):
     proposed_actions: List[ProposedAction] = Field(default_factory=list)
     actions_taken: List[ExecutedAction] = Field(default_factory=list)
     summary: str
+    active_specialists: List[str] = Field(default_factory=list)
 
 
 class RecallResult(BaseModel):
     session_id: str
     incidents: List[PastIncident]
     summary: str
+    active_specialists: List[str] = Field(default_factory=list)
 
 
 class SummaryResult(BaseModel):
@@ -65,3 +68,4 @@ class SummaryResult(BaseModel):
     top_issues: List[str]
     recommended_actions: List[ProposedAction]
     date_range: str
+    active_specialists: List[str] = Field(default_factory=list)
